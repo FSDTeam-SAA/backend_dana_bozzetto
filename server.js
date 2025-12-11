@@ -3,7 +3,9 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import morgan from 'morgan';
-import mainRoutes from './mainroute/index.js'; 
+import http from 'http';
+import mainRoutes from './mainroute/index.js';
+import { initSocket } from './utils/socket.js'; // Import the separated logic
 
 // Load environment variables
 dotenv.config();
@@ -11,11 +13,20 @@ dotenv.config();
 // Initialize Express app
 const app = express();
 
+// Create HTTP server (Wrap Express)
+const server = http.createServer(app);
+
+// Initialize Socket.io (using the separate file)
+const io = initSocket(server);
+
+// Make 'io' accessible globally via req.app.get('io') in controllers
+app.set('io', io);
+
 // Middleware
 app.use(cors());
-app.use(express.json()); // Parse JSON bodies
-app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
-app.use(morgan('dev')); // Logger
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan('dev'));
 
 // Database Connection
 const connectDB = async () => {
@@ -24,19 +35,19 @@ const connectDB = async () => {
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`Error: ${error.message}`);
-    process.exit(1);  
+    process.exit(1);
   }
 };
 
-
+// Routes
 app.use('/api', mainRoutes);
 
-// Base Route for testing server status
+// Base Route
 app.get('/', (req, res) => {
   res.send('Architectural Project Management API is running...');
 });
 
-// Global Error Handling Middleware
+// Global Error Handler
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
   res.status(statusCode);
@@ -46,10 +57,12 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Start Server
 const PORT = process.env.PORT || 5000;
 
 connectDB().then(() => {
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+    console.log(`Socket.io is ready for connections`);
   });
 });
