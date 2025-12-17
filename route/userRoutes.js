@@ -4,6 +4,7 @@ import {
   addClient,
   getUsersByRole,
   getClientDashboard,
+  getTeamMemberDashboard, // Import the new function
   deleteUser
 } from '../controller/userController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
@@ -21,6 +22,10 @@ router.get('/', getUsersByRole);
 // @route   GET /api/users/client/:id/dashboard
 // @desc    Get specific client dashboard stats (Widgets + Info)
 router.get('/client/:id/dashboard', getClientDashboard);
+
+// @route   GET /api/users/team-member/:id/dashboard
+// @desc    Get specific team member dashboard stats (Projects + Task Performance)
+router.get('/team-member/:id/dashboard', getTeamMemberDashboard);
 
 // @route   POST /api/users/team-member
 // @desc    Create Team Member (Admin only, supports Avatar upload)

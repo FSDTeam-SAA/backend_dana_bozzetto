@@ -8,6 +8,8 @@ import messageRoutes from '../route/messageRoutes.js';
 import notificationRoutes from '../route/notificationRoutes.js';
 import adminRoutes from '../route/adminRoutes.js';
 import userRoutes from '../route/userRoutes.js';
+import teamMemberRoutes from '../route/teamMemberRoutes.js';
+import clientPortalRoutes from '../route/clientPortalRoutes.js'; 
 
 const router = express.Router();
 
@@ -19,6 +21,8 @@ router.use('/finance', financeRoutes);
 router.use('/messages', messageRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRoutes);
-router.use('/users', userRoutes); 
+router.use('/users', userRoutes);
+router.use('/team-portal', teamMemberRoutes);
+router.use('/client-portal', clientPortalRoutes);
 
 export default router;
