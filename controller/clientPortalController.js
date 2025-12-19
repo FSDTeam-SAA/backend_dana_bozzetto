@@ -4,12 +4,10 @@ import { Finance } from '../model/Finance.js';
 import { Message } from '../model/Message.js';
 
 // @desc    Get Client Homepage Data (Dashboard)
-// @route   GET /api/client-portal/dashboard
 export const getClientDashboard = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // 1. Basic Stats & Projects (Same as before)
     const activeProjectsCount = await Project.countDocuments({ client: userId, status: 'Active' });
     const pendingProjectsCount = await Project.countDocuments({ client: userId, status: 'Pending' });
 
@@ -38,15 +36,19 @@ export const getClientDashboard = async (req, res) => {
 
     const projectIds = projectsRaw.map(p => p._id);
 
-    // 2. AGGREGATED RECENT ACTIVITY
-    
-    // A. Fetch Recent Documents (Last 3)
-    const newDocs = await Document.find({ project: { $in: projectIds } })
-      .sort({ createdAt: -1 })
-      .limit(3)
-      .populate('uploadedBy', 'name');
+    // Filter Recent Activity to hide internal drafts
+    // Only show documents that are ready for the client (Deliverables or Review items)
+    const newDocs = await Document.find({ 
+      project: { $in: projectIds },
+      $or: [
+        { type: 'Deliverable' }, // Always show final deliverables
+        { status: { $in: ['Approved', 'Review', 'Pending', 'Revision Requested'] } }
+      ]
+    })
+    .sort({ createdAt: -1 })
+    .limit(3)
+    .populate('uploadedBy', 'name');
 
-    // B. Fetch Pending Approvals (Status is Review or Pending)
     const pendingApprovals = await Document.find({ 
       project: { $in: projectIds },
       status: { $in: ['Pending', 'Review'] }
@@ -54,27 +56,19 @@ export const getClientDashboard = async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(3);
 
-    // C. Fetch Recent Messages (Sent to this Client)
-    // Assuming Message model has 'receiver' or is chat-room based. 
-    // Simplified: Find messages in project chats where sender is NOT the client
     const recentMessages = await Message.find({
-       // This logic depends on your Message model structure. 
-       // Assuming simplistic 'sender' check for now:
        sender: { $ne: userId },
-       // In a real app, you'd filter by Chat Rooms linked to these projects
     })
     .sort({ createdAt: -1 })
     .limit(3)
     .populate('sender', 'name');
 
-    // 3. Merge & Format the Feed
     let activityFeed = [];
 
-    // Add Docs to Feed
     newDocs.forEach(doc => {
       activityFeed.push({
-        type: 'document', // Icon logic in frontend
-        text: `New document uploaded: ${doc.name}`,
+        type: 'document', 
+        text: `New document: ${doc.name}`,
         subText: doc.uploadedBy ? `By ${doc.uploadedBy.name}` : '',
         time: doc.createdAt,
         id: doc._id,
@@ -82,10 +76,9 @@ export const getClientDashboard = async (req, res) => {
       });
     });
 
-    // Add Approvals to Feed
     pendingApprovals.forEach(doc => {
       activityFeed.push({
-        type: 'approval', // Alert Icon
+        type: 'approval', 
         text: `Approval required: ${doc.name}`,
         subText: 'Action needed',
         time: doc.updatedAt || doc.createdAt,
@@ -94,10 +87,9 @@ export const getClientDashboard = async (req, res) => {
       });
     });
 
-    // Add Messages to Feed
     recentMessages.forEach(msg => {
       activityFeed.push({
-        type: 'message', // Chat Icon
+        type: 'message', 
         text: `New message from ${msg.sender ? msg.sender.name : 'Team'}`,
         subText: msg.content.substring(0, 30) + '...',
         time: msg.createdAt,
@@ -106,9 +98,8 @@ export const getClientDashboard = async (req, res) => {
       });
     });
 
-    // 4. Final Sort by Time (Newest First) and Limit
     activityFeed.sort((a, b) => new Date(b.time) - new Date(a.time));
-    activityFeed = activityFeed.slice(0, 5); // Show only top 5 items
+    activityFeed = activityFeed.slice(0, 5); 
 
     res.json({
       userName: req.user.name,
@@ -126,42 +117,57 @@ export const getClientDashboard = async (req, res) => {
   }
 };
 
-// ... (Keep the rest of the file: getClientDocuments, addDocumentComment, getClientFinance, etc.) ...
+// @desc    Get All Client Documents (Quick Action) - FILTERED
+// @route   GET /api/client-portal/documents
 export const getClientDocuments = async (req, res) => {
-    // ... (Previous code)
-    try {
-        const userId = req.user._id;
-        const projects = await Project.find({ client: userId });
-        const documents = await Document.find({ project: { $in: projects.map(p => p._id) } })
-          .populate('project', 'name')
-          .populate('uploadedBy', 'name')
-          .sort({ createdAt: -1 });
-    
-        const formattedDocs = documents.map(doc => {
-          const projectRef = projects.find(p => p._id.toString() === doc.project._id.toString());
-          const milestone = projectRef ? projectRef.milestones.id(doc.milestoneId) : null;
-          return {
-            _id: doc._id,
-            name: doc.name,
-            projectName: doc.project.name,
-            milestoneName: milestone ? milestone.name : 'General',
-            type: doc.type,
-            size: doc.file.size,
-            url: doc.file.url,
-            uploadedBy: doc.uploadedBy ? doc.uploadedBy.name : 'Unknown',
-            uploadedDate: doc.createdAt,
-            status: doc.status,
-            commentsCount: doc.comments.length
-          };
-        });
-        res.json(formattedDocs);
-      } catch (error) {
-        res.status(500).json({ message: 'Server error' });
-      }
+  try {
+    const userId = req.user._id;
+    const { category } = req.query; 
+
+    const projects = await Project.find({ client: userId }).select('_id milestones');
+    const projectIds = projects.map(p => p._id);
+
+    // Build Query: Only specific statuses or types
+    let query = { 
+      project: { $in: projectIds },
+      $or: [
+        { type: 'Deliverable' }, // Final milestone docs uploaded by Admin
+        { status: { $in: ['Approved', 'Review', 'Pending', 'Revision Requested', 'Rejected'] } } // Items needing client attention
+      ]
+    };
+
+    const documents = await Document.find(query)
+      .populate('project', 'name') 
+      .populate('uploadedBy', 'name') 
+      .sort({ createdAt: -1 });
+
+    const formattedDocs = documents.map(doc => {
+      const projectRef = projects.find(p => p._id.toString() === doc.project._id.toString());
+      const milestone = projectRef ? projectRef.milestones.id(doc.milestoneId) : null;
+
+      return {
+        _id: doc._id,
+        name: doc.name,
+        projectName: doc.project.name,
+        milestoneName: milestone ? milestone.name : 'General', 
+        type: doc.type, 
+        size: doc.file.size,
+        url: doc.file.url,
+        uploadedBy: doc.uploadedBy ? doc.uploadedBy.name : 'Unknown',
+        uploadedDate: doc.createdAt,
+        status: doc.status, 
+        commentsCount: doc.comments.length
+      };
+    });
+
+    res.json(formattedDocs);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
 };
 
 export const addDocumentComment = async (req, res) => {
-    // ... (Previous code)
     try {
         const { text } = req.body;
         const document = await Document.findById(req.params.id);
@@ -176,7 +182,6 @@ export const addDocumentComment = async (req, res) => {
 };
 
 export const getClientFinance = async (req, res) => {
-    // ... (Previous code)
     try {
         const userId = req.user._id;
         const projects = await Project.find({ client: userId });
@@ -208,7 +213,6 @@ export const getClientFinance = async (req, res) => {
 };
 
 export const getClientApprovals = async (req, res) => {
-    // ... (Previous code)
     try {
         const userId = req.user._id;
         const projects = await Project.find({ client: userId }).select('_id');
@@ -216,6 +220,7 @@ export const getClientApprovals = async (req, res) => {
     
         const documents = await Document.find({
           project: { $in: projectIds },
+          // HIDE 'Waiting for Approval' (Internal)
           status: { $in: ['Pending', 'Review', 'Approved', 'Rejected', 'Revision Requested'] }
         })
         .populate('project', 'name')
@@ -240,7 +245,6 @@ export const getClientApprovals = async (req, res) => {
 };
 
 export const updateApprovalStatus = async (req, res) => {
-    // ... (Previous code)
     try {
         const { status, feedback } = req.body;
         const documentId = req.params.id;

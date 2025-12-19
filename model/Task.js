@@ -4,11 +4,7 @@ const taskSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, "Task name is required"], 
-      trim: true,
-    },
-    description: {
-      type: String, 
+      required: true,
       trim: true,
     },
     project: {
@@ -26,7 +22,7 @@ const taskSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Pending', 'Wip', 'Done', 'Dispute'],
+      enum: ['Pending', 'In Progress', 'Waiting for Approval', 'Completed', 'On Hold'],
       default: 'Pending',
     },
     priority: {
@@ -34,20 +30,22 @@ const taskSchema = new mongoose.Schema(
       enum: ['Low', 'Medium', 'High'],
       default: 'Medium',
     },
-    startDate: {
-      type: Date,
-    },
-    endDate: {
-      type: Date,
-    },
-
-    attachments: [
-      {
+    startDate: Date,
+    endDate: Date,
+    submission: {
+      docName: String, // e.g., "Pre-Design"
+      docType: String, // e.g., "PDF", "DWG"
+      notes: String,
+      file: {
         public_id: String,
         url: String,
-        type: String,
-      }
-    ]
+        format: String,
+        size: Number
+      },
+      submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      submittedAt: Date,
+    },
+    adminFeedback: String
   },
   {
     timestamps: true,

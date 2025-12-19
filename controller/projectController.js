@@ -19,33 +19,26 @@ export const createProject = async (req, res) => {
       startDate,
       endDate,
       status,
-      teamMembers // Received as stringified JSON: '["ID1", "ID2"]'
+      teamMembers 
     } = req.body;
 
-    // 1. Verify Client
     const clientUser = await User.findById(clientId);
     if (!clientUser || clientUser.role !== 'client') {
       return res.status(400).json({ message: 'Invalid Client ID provided' });
     }
 
-    // 2. Process Team Members
-    // Fix: Convert ["ID1", "ID2"] -> [{ user: "ID1" }, { user: "ID2" }]
+    // Process Team Members (String -> Object Array)
     let formattedTeam = [];
     if (teamMembers) {
       const parsedMembers = typeof teamMembers === 'string' ? JSON.parse(teamMembers) : teamMembers;
-      
       if (Array.isArray(parsedMembers)) {
         formattedTeam = parsedMembers.map(member => {
-          // If the item is just an ID string, wrap it in an object
-          if (typeof member === 'string') {
-            return { user: member, role: 'Contributor' };
-          }
-          return member; // Already an object
+          if (typeof member === 'string') return { user: member, role: 'Contributor' };
+          return member;
         });
       }
     }
 
-    // 3. Handle Cover Image Upload
     let coverImageData = { public_id: '', url: '' };
     if (req.files && req.files['coverImage']) {
       const file = req.files['coverImage'][0];
@@ -53,7 +46,6 @@ export const createProject = async (req, res) => {
       coverImageData = { public_id: result.public_id, url: result.secure_url };
     }
 
-    // 4. Create Project
     const project = await Project.create({
       projectNo,
       name,
@@ -63,12 +55,11 @@ export const createProject = async (req, res) => {
       startDate,
       endDate,
       status: status || 'Active',
-      teamMembers: formattedTeam, // Use the formatted array
+      teamMembers: formattedTeam,
       coverImage: coverImageData,
       milestones: [{ name: 'Pre-Design', status: 'Pending', isEnabled: true }]
     });
 
-    // 5. Handle "Initial Documents" Upload
     if (req.files && req.files['documents']) {
       const initialMilestone = project.milestones[0];
       const uploadPromises = req.files['documents'].map(async (file) => {
@@ -100,6 +91,8 @@ export const createProject = async (req, res) => {
 };
 
 // @desc    Get all projects
+// @route   GET /api/projects
+// @access  Private
 export const getProjects = async (req, res) => {
     try {
       let query = {};
@@ -123,6 +116,8 @@ export const getProjects = async (req, res) => {
 };
 
 // @desc    Get Full Project Details
+// @route   GET /api/projects/:id
+// @access  Private
 export const getProjectById = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id)
@@ -174,6 +169,8 @@ export const getProjectById = async (req, res) => {
 };
 
 // @desc    Update project details
+// @route   PUT /api/projects/:id
+// @access  Private/Admin
 export const updateProject = async (req, res) => {
     try {
       const project = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -183,7 +180,9 @@ export const updateProject = async (req, res) => {
     }
 };
 
-// @desc    Add a Milestone
+// @desc    Add a Milestone (Manual)
+// @route   POST /api/projects/:id/milestones
+// @access  Private/Admin
 export const addMilestone = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id);
@@ -199,6 +198,8 @@ export const addMilestone = async (req, res) => {
 };
 
 // @desc    Delete a project
+// @route   DELETE /api/projects/:id
+// @access  Private/Admin
 export const deleteProject = async (req, res) => {
     try {
       await Project.findByIdAndDelete(req.params.id);
@@ -209,19 +210,17 @@ export const deleteProject = async (req, res) => {
 };
 
 // @desc    Add a Team Member to an existing Project
+// @route   POST /api/projects/:id/team
+// @access  Private/Admin
 export const addTeamMemberToProject = async (req, res) => {
   try {
     const { userId, role } = req.body;
     const project = await Project.findById(req.params.id);
 
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
+    if (!project) return res.status(404).json({ message: 'Project not found' });
 
     const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
     const isAlreadyMember = project.teamMembers.some(
       (member) => member.user.toString() === userId
@@ -231,11 +230,7 @@ export const addTeamMemberToProject = async (req, res) => {
       return res.status(400).json({ message: 'User is already assigned to this project' });
     }
 
-    project.teamMembers.push({ 
-      user: userId, 
-      role: role || 'Contributor' 
-    });
-
+    project.teamMembers.push({ user: userId, role: role || 'Contributor' });
     await project.save();
     await project.populate('teamMembers.user', 'name role avatar');
 
@@ -243,5 +238,60 @@ export const addTeamMemberToProject = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc    Upload Final Milestone Document (Admin Only)
+// @route   POST /api/projects/:id/milestones/:milestoneId/upload
+// @access  Private/Admin
+export const uploadMilestoneDocument = async (req, res) => {
+  try {
+    const { id, milestoneId } = req.params;
+    
+    // 1. Find Project and Milestone
+    const project = await Project.findById(id);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    const milestone = project.milestones.id(milestoneId);
+    if (!milestone) return res.status(404).json({ message: 'Milestone not found' });
+
+    // 2. Upload File
+    if (!req.file) return res.status(400).json({ message: 'File is required' });
+    
+    const result = await uploadToCloudinary(req.file.buffer, 'architectural-projects/milestones');
+
+    // 3. Create Document Record
+    // Mark as "Approved" immediately since Admin is uploading it for the Client
+    const document = await Document.create({
+      name: req.body.name || file.originalname,
+      project: project._id,
+      milestoneId: milestone._id,
+      uploadedBy: req.user._id,
+      file: {
+        public_id: result.public_id,
+        url: result.secure_url,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        format: result.format
+      },
+      type: 'Deliverable', // Special type for final milestone docs
+      status: 'Review' // Client needs to review it
+    });
+
+    // 4. Update Milestone Status
+    // Since Admin uploaded the final doc, we mark the milestone as Completed (or Active for Review)
+    milestone.status = 'Completed';
+    
+    // Also update overall project progress? (Simple logic: % of completed milestones)
+    const total = project.milestones.length;
+    const completed = project.milestones.filter(m => m.status === 'Completed').length;
+    project.overallProgress = Math.round((completed / total) * 100);
+
+    await project.save();
+
+    res.json({ message: 'Milestone document uploaded', document, project });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };

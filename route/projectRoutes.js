@@ -6,13 +6,15 @@ import {
   updateProject,
   deleteProject,
   addMilestone,
-  addTeamMemberToProject
+  addTeamMemberToProject,
+  uploadMilestoneDocument // Import the new function
 } from '../controller/projectController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 import upload from '../utils/fileUpload.js';
 
 const router = express.Router();
 
+// All routes require login
 router.use(protect);
 
 router.route('/')
@@ -31,9 +33,19 @@ router.route('/:id')
   .put(authorize('admin'), updateProject)
   .delete(authorize('admin'), deleteProject);
 
+// Route to add a milestone manually
 router.route('/:id/milestones')
   .post(authorize('admin'), addMilestone);
 
+// Route to upload Final Milestone Document (Completes the milestone)
+router.route('/:id/milestones/:milestoneId/upload')
+  .post(
+    authorize('admin'),
+    upload.single('document'), // Field name must be 'document'
+    uploadMilestoneDocument
+  );
+
+// Route to add a team member to an existing project
 router.route('/:id/team')
   .post(authorize('admin'), addTeamMemberToProject);
 

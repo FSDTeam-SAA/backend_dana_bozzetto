@@ -5,40 +5,39 @@ const notificationSchema = new mongoose.Schema(
     recipient: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: true, // Who receives the notification
     },
     sender: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: 'User', // Who triggered it (Admin, Client, or Team Member)
     },
-    title: {
+    type: {
       type: String,
+      enum: ['Task Assigned', 'Task Submitted', 'Task Reviewed', 'Document Uploaded', 'Approval Request', 'Message'],
       required: true,
-      trim: true, 
     },
     message: {
       type: String,
-      required: true, 
+      required: true,
+    },
+    // Dynamic Reference: Links to Task, Project, or Document
+    relatedId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      refPath: 'onModel', 
+    },
+    onModel: {
+      type: String,
+      required: true,
+      enum: ['Task', 'Project', 'Document', 'Finance'],
     },
     isRead: {
       type: Boolean,
       default: false,
     },
-    type: {
-      type: String,
-      enum: ['info', 'alert', 'success', 'warning'],
-      default: 'info',
-    },
-    relatedId: {
-      type: mongoose.Schema.Types.ObjectId,
-    },
-    relatedModel: {
-      type: String,
-      enum: ['Project', 'Task', 'Document', 'Finance', 'User'],
-    },
   },
   {
-    timestamps: true, 
+    timestamps: true, // Automatic createdAt, updatedAt
   }
 );
 
