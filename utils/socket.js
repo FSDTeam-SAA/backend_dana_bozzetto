@@ -1,43 +1,53 @@
 import { Server } from 'socket.io';
 
-let io;
-
-export const initSocket = (server) => {
-  io = new Server(server, {
+export const initSocket = (httpServer) => {
+  const io = new Server(httpServer, {
+    pingTimeout: 60000,
     cors: {
-      origin: "*",
-      methods: ["GET", "POST", "PUT", "DELETE"]
-    }
+      origin: process.env.FRONTEND_URL || "http://localhost:3000",
+      methods: ["GET", "POST", "PUT", "DELETE"],
+      credentials: true,
+    },
   });
 
   io.on('connection', (socket) => {
-    console.log(`User Connected: ${socket.id}`);
+    console.log('Connected to socket.io:', socket.id);
 
-    socket.on('join_user', (userId) => {
-      if (userId) {
-        socket.join(userId);
-        console.log(`User ${userId} joined their personal room`);
-      }
+    // 1. Setup User Room (Login)
+    socket.on('setup', (userData) => {
+      socket.join(userData._id);
+      console.log(`User joined personal room: ${userData._id}`);
+      socket.emit('connected');
     });
 
-    socket.on('join_project', (projectId) => {
-      if (projectId) {
-        socket.join(projectId);
-        console.log(`Socket ${socket.id} joined project room: ${projectId}`);
-      }
+    // 2. Join Chat Room
+    socket.on('join chat', (room) => {
+      socket.join(room);
+      console.log(`User joined chat room: ${room}`);
+    });
+
+    // 3. Typing Indicators
+    socket.on('typing', (room) => socket.in(room).emit('typing'));
+    socket.on('stop typing', (room) => socket.in(room).emit('stop typing'));
+
+    // 4. New Message Handling
+    socket.on('new message', (newMessageReceived) => {
+      var chat = newMessageReceived.chat;
+
+      if (!chat.users) return console.log('Chat.users not defined');
+
+      chat.users.forEach((user) => {
+        if (user._id === newMessageReceived.sender._id) return; // Don't send to self
+        
+        // Send to the specific user's personal room
+        socket.in(user._id).emit('message received', newMessageReceived);
+      });
     });
 
     socket.on('disconnect', () => {
-      console.log('User Disconnected', socket.id);
+      console.log('USER DISCONNECTED');
     });
   });
 
-  return io;
-};
-
-export const getIO = () => {
-  if (!io) {
-    throw new Error("Socket.io not initialized!");
-  }
   return io;
 };

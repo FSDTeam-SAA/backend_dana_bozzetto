@@ -23,7 +23,13 @@ const io = initSocket(server);
 app.set('io', io);
 
 // Middleware
-app.use(cors());
+// UPDATED: Specific CORS config is required for Socket.io + Frontend credentials
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));

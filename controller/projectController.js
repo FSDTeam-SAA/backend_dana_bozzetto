@@ -3,11 +3,10 @@ import User from '../model/User.js';
 import { Document } from '../model/Document.js';
 import { Task } from '../model/Task.js';
 import { Finance } from '../model/Finance.js';
+import { Notification } from '../model/Notification.js'; // Import Notification
 import { uploadToCloudinary } from '../utils/cloudinary.js';
 
 // @desc    Create a new project
-// @route   POST /api/projects
-// @access  Private/Admin
 export const createProject = async (req, res) => {
   try {
     const {
@@ -27,7 +26,7 @@ export const createProject = async (req, res) => {
       return res.status(400).json({ message: 'Invalid Client ID provided' });
     }
 
-    // Process Team Members (String -> Object Array)
+    // Process Team Members
     let formattedTeam = [];
     if (teamMembers) {
       const parsedMembers = typeof teamMembers === 'string' ? JSON.parse(teamMembers) : teamMembers;
@@ -83,6 +82,21 @@ export const createProject = async (req, res) => {
       await Promise.all(uploadPromises);
     }
 
+    // NOTIFICATION TRIGGER: Notify Team Members they were added
+    if (formattedTeam.length > 0) {
+        const notificationPromises = formattedTeam.map(member => 
+            Notification.create({
+                recipient: member.user,
+                sender: req.user._id,
+                type: 'Message', // Using 'Message' as a generic assignment notification
+                message: `You have been assigned to a new project: ${name}`,
+                relatedId: project._id,
+                onModel: 'Project'
+            })
+        );
+        await Promise.all(notificationPromises);
+    }
+
     res.status(201).json(project);
   } catch (error) {
     console.error(error);
@@ -91,8 +105,6 @@ export const createProject = async (req, res) => {
 };
 
 // @desc    Get all projects
-// @route   GET /api/projects
-// @access  Private
 export const getProjects = async (req, res) => {
     try {
       let query = {};
@@ -116,8 +128,6 @@ export const getProjects = async (req, res) => {
 };
 
 // @desc    Get Full Project Details
-// @route   GET /api/projects/:id
-// @access  Private
 export const getProjectById = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id)
@@ -169,8 +179,6 @@ export const getProjectById = async (req, res) => {
 };
 
 // @desc    Update project details
-// @route   PUT /api/projects/:id
-// @access  Private/Admin
 export const updateProject = async (req, res) => {
     try {
       const project = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -180,9 +188,7 @@ export const updateProject = async (req, res) => {
     }
 };
 
-// @desc    Add a Milestone (Manual)
-// @route   POST /api/projects/:id/milestones
-// @access  Private/Admin
+// @desc    Add a Milestone
 export const addMilestone = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id);
@@ -198,8 +204,6 @@ export const addMilestone = async (req, res) => {
 };
 
 // @desc    Delete a project
-// @route   DELETE /api/projects/:id
-// @access  Private/Admin
 export const deleteProject = async (req, res) => {
     try {
       await Project.findByIdAndDelete(req.params.id);
@@ -210,8 +214,6 @@ export const deleteProject = async (req, res) => {
 };
 
 // @desc    Add a Team Member to an existing Project
-// @route   POST /api/projects/:id/team
-// @access  Private/Admin
 export const addTeamMemberToProject = async (req, res) => {
   try {
     const { userId, role } = req.body;
@@ -232,6 +234,17 @@ export const addTeamMemberToProject = async (req, res) => {
 
     project.teamMembers.push({ user: userId, role: role || 'Contributor' });
     await project.save();
+    
+    // NOTIFICATION TRIGGER: Notify the specific user
+    await Notification.create({
+        recipient: userId,
+        sender: req.user._id,
+        type: 'Message',
+        message: `You have been added to the project team: ${project.name}`,
+        relatedId: project._id,
+        onModel: 'Project'
+    });
+
     await project.populate('teamMembers.user', 'name role avatar');
 
     res.json(project.teamMembers);
@@ -242,28 +255,22 @@ export const addTeamMemberToProject = async (req, res) => {
 };
 
 // @desc    Upload Final Milestone Document (Admin Only)
-// @route   POST /api/projects/:id/milestones/:milestoneId/upload
-// @access  Private/Admin
 export const uploadMilestoneDocument = async (req, res) => {
   try {
     const { id, milestoneId } = req.params;
     
-    // 1. Find Project and Milestone
     const project = await Project.findById(id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
     const milestone = project.milestones.id(milestoneId);
     if (!milestone) return res.status(404).json({ message: 'Milestone not found' });
 
-    // 2. Upload File
     if (!req.file) return res.status(400).json({ message: 'File is required' });
     
     const result = await uploadToCloudinary(req.file.buffer, 'architectural-projects/milestones');
 
-    // 3. Create Document Record
-    // Mark as "Approved" immediately since Admin is uploading it for the Client
     const document = await Document.create({
-      name: req.body.name || file.originalname,
+      name: req.body.name || req.file.originalname,
       project: project._id,
       milestoneId: milestone._id,
       uploadedBy: req.user._id,
@@ -274,20 +281,26 @@ export const uploadMilestoneDocument = async (req, res) => {
         size: req.file.size,
         format: result.format
       },
-      type: 'Deliverable', // Special type for final milestone docs
-      status: 'Review' // Client needs to review it
+      type: 'Deliverable', 
+      status: 'Review' 
     });
 
-    // 4. Update Milestone Status
-    // Since Admin uploaded the final doc, we mark the milestone as Completed (or Active for Review)
     milestone.status = 'Completed';
-    
-    // Also update overall project progress? (Simple logic: % of completed milestones)
     const total = project.milestones.length;
     const completed = project.milestones.filter(m => m.status === 'Completed').length;
     project.overallProgress = Math.round((completed / total) * 100);
 
     await project.save();
+
+    // NOTIFICATION TRIGGER: Notify the Client
+    await Notification.create({
+        recipient: project.client,
+        sender: req.user._id,
+        type: 'Document Uploaded',
+        message: `A new milestone deliverable "${document.name}" is available for your review.`,
+        relatedId: document._id,
+        onModel: 'Document'
+    });
 
     res.json({ message: 'Milestone document uploaded', document, project });
   } catch (error) {

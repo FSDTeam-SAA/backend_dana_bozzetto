@@ -1,10 +1,10 @@
 import { Task } from '../model/Task.js';
 import { Project } from '../model/Project.js';
+import { Notification } from '../model/Notification.js'; // Import Notification Model
+import User from '../model/User.js'; // Import User Model to find Admins
 import { uploadToCloudinary } from '../utils/cloudinary.js';
 
 // @desc    Create a new task (Admin or Team)
-// @route   POST /api/tasks
-// @access  Private
 export const createTask = async (req, res) => {
   try {
     const { name, projectId, milestoneId, assignedTo, priority, startDate, endDate } = req.body;
@@ -20,6 +20,18 @@ export const createTask = async (req, res) => {
       status: 'Pending'
     });
 
+    // NOTIFICATION TRIGGER: If assigned to someone, notify them
+    if (assignedTo) {
+      await Notification.create({
+        recipient: assignedTo,
+        sender: req.user._id,
+        type: 'Task Assigned',
+        message: `You have been assigned a new task: ${name}`,
+        relatedId: task._id,
+        onModel: 'Task'
+      });
+    }
+
     res.status(201).json(task);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -27,8 +39,6 @@ export const createTask = async (req, res) => {
 };
 
 // @desc    Get Tasks for a Project
-// @route   GET /api/tasks?projectId=...
-// @access  Private
 export const getTasks = async (req, res) => {
   try {
     const { projectId } = req.query;
@@ -42,8 +52,6 @@ export const getTasks = async (req, res) => {
 };
 
 // @desc    Submit Task for Approval (Team Member)
-// @route   POST /api/tasks/:id/submit
-// @access  Private (Team Member)
 export const submitTask = async (req, res) => {
   try {
     const taskId = req.params.id;
@@ -52,7 +60,6 @@ export const submitTask = async (req, res) => {
     const task = await Task.findById(taskId);
     if (!task) return res.status(404).json({ message: 'Task not found' });
 
-    // Handle File Upload (Required for submission)
     let fileData = {};
     if (req.file) {
       const result = await uploadToCloudinary(req.file.buffer, 'architectural-portal/tasks');
@@ -66,7 +73,6 @@ export const submitTask = async (req, res) => {
         return res.status(400).json({ message: 'Document file is required for submission' });
     }
 
-    // Update Task with Submission Data
     task.submission = {
       docName,
       docType,
@@ -76,9 +82,22 @@ export const submitTask = async (req, res) => {
       submittedAt: new Date()
     };
     
-    // Change status so it appears in Admin's "Approval" list
     task.status = 'Waiting for Approval';
     await task.save();
+
+    // NOTIFICATION TRIGGER: Notify ALL Admins
+    const admins = await User.find({ role: 'admin' });
+    const notificationPromises = admins.map(admin => 
+      Notification.create({
+        recipient: admin._id,
+        sender: req.user._id,
+        type: 'Task Submitted',
+        message: `${req.user.name} submitted task "${task.name}" for approval.`,
+        relatedId: task._id,
+        onModel: 'Task'
+      })
+    );
+    await Promise.all(notificationPromises);
 
     res.json({ message: 'Task submitted for approval', task });
   } catch (error) {
@@ -88,12 +107,10 @@ export const submitTask = async (req, res) => {
 };
 
 // @desc    Review Task (Admin) - Approve/Reject AND Auto-Complete Milestone
-// @route   PUT /api/tasks/:id/review
-// @access  Private (Admin)
 export const reviewTask = async (req, res) => {
   try {
     const taskId = req.params.id;
-    const { status, feedback } = req.body; // status: 'Approved' or 'Rejected'
+    const { status, feedback } = req.body; 
 
     const task = await Task.findById(taskId);
     if (!task) return res.status(404).json({ message: 'Task not found' });
@@ -101,49 +118,51 @@ export const reviewTask = async (req, res) => {
     if (status === 'Approved') {
       task.status = 'Completed';
       
-      // --- AUTOMATION: Check if Milestone is Complete ---
-      // 1. Fetch all tasks for this specific project AND milestone
+      // Auto-Complete Milestone Logic
       const milestoneTasks = await Task.find({ 
         project: task.project, 
         milestoneId: task.milestoneId 
       });
 
-      // 2. Check if any OTHER task is incomplete
-      // (We filter out the current task because it is not saved as 'Completed' in DB yet)
       const pendingTasks = milestoneTasks.filter(t => 
         t._id.toString() !== taskId && t.status !== 'Completed'
       );
 
-      // 3. If no tasks are pending, mark the Milestone as Completed
       if (pendingTasks.length === 0) {
         const project = await Project.findById(task.project);
         if (project) {
           const milestone = project.milestones.id(task.milestoneId);
           if (milestone) {
              milestone.status = 'Completed';
-             
-             // 4. Update Overall Project Progress %
              const totalMilestones = project.milestones.length;
              const completedMilestones = project.milestones.filter(m => m.status === 'Completed').length;
-             // Avoid division by zero
-             project.overallProgress = totalMilestones > 0 
-               ? Math.round((completedMilestones / totalMilestones) * 100) 
-               : 0;
-             
+             project.overallProgress = totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0;
              await project.save();
           }
         }
       }
-      // --------------------------------------------------
 
     } else if (status === 'Rejected') {
-      task.status = 'In Progress'; // Send back to team member
-      task.adminFeedback = feedback; // Save rejection reason
+      task.status = 'In Progress'; 
+      task.adminFeedback = feedback; 
     } else {
       return res.status(400).json({ message: 'Invalid status' });
     }
 
     await task.save();
+
+    // NOTIFICATION TRIGGER: Notify the Team Member
+    if (task.assignedTo) {
+      await Notification.create({
+        recipient: task.assignedTo,
+        sender: req.user._id,
+        type: 'Task Reviewed',
+        message: `Your task "${task.name}" was ${status}. ${feedback ? `Feedback: ${feedback}` : ''}`,
+        relatedId: task._id,
+        onModel: 'Task'
+      });
+    }
+
     res.json(task);
   } catch (error) {
     console.error(error);
@@ -151,9 +170,7 @@ export const reviewTask = async (req, res) => {
   }
 };
 
-// @desc    Update Task Details (General Edit)
-// @route   PUT /api/tasks/:id
-// @access  Private
+// @desc    Update Task Details
 export const updateTask = async (req, res) => {
   try {
     const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -164,8 +181,6 @@ export const updateTask = async (req, res) => {
 };
 
 // @desc    Delete Task
-// @route   DELETE /api/tasks/:id
-// @access  Private
 export const deleteTask = async (req, res) => {
   try {
     await Task.findByIdAndDelete(req.params.id);

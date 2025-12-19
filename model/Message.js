@@ -2,41 +2,24 @@ import mongoose from 'mongoose';
 
 const messageSchema = new mongoose.Schema(
   {
-    project: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Project',
-    },
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
     },
-    recipient: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-    },
-    text: {
+    content: {
       type: String,
-      required: true,
       trim: true,
     },
-    attachments: [
-      {
-        public_id: String,
-        url: String,
-        type: String, 
-      }
-    ],
+    chat: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Chat',
+    },
     readBy: [
       {
-        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        readAt: { type: Date, default: Date.now }
-      }
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
     ],
-    isSystemMessage: {
-      type: Boolean,
-      default: false, 
-    }
   },
   {
     timestamps: true,

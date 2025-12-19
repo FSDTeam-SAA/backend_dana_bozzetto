@@ -2,6 +2,8 @@ import { Project } from '../model/Project.js';
 import { Document } from '../model/Document.js';
 import { Finance } from '../model/Finance.js';
 import { Message } from '../model/Message.js';
+import { Notification } from '../model/Notification.js';
+import User from '../model/User.js';
 
 // @desc    Get Client Homepage Data (Dashboard)
 export const getClientDashboard = async (req, res) => {
@@ -37,11 +39,10 @@ export const getClientDashboard = async (req, res) => {
     const projectIds = projectsRaw.map(p => p._id);
 
     // Filter Recent Activity to hide internal drafts
-    // Only show documents that are ready for the client (Deliverables or Review items)
     const newDocs = await Document.find({ 
       project: { $in: projectIds },
       $or: [
-        { type: 'Deliverable' }, // Always show final deliverables
+        { type: 'Deliverable' }, // Final milestone docs uploaded by Admin
         { status: { $in: ['Approved', 'Review', 'Pending', 'Revision Requested'] } }
       ]
     })
@@ -56,8 +57,8 @@ export const getClientDashboard = async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(3);
 
-    const recentMessages = await Message.find({
-       sender: { $ne: userId },
+    const recentMessages = await Message.find({ 
+       sender: { $ne: userId }
     })
     .sort({ createdAt: -1 })
     .limit(3)
@@ -99,7 +100,6 @@ export const getClientDashboard = async (req, res) => {
     });
 
     activityFeed.sort((a, b) => new Date(b.time) - new Date(a.time));
-    activityFeed = activityFeed.slice(0, 5); 
 
     res.json({
       userName: req.user.name,
@@ -108,7 +108,7 @@ export const getClientDashboard = async (req, res) => {
         pending: pendingProjectsCount
       },
       projects,
-      recentActivity: activityFeed
+      recentActivity: activityFeed.slice(0, 5)
     });
 
   } catch (error) {
@@ -118,21 +118,21 @@ export const getClientDashboard = async (req, res) => {
 };
 
 // @desc    Get All Client Documents (Quick Action) - FILTERED
-// @route   GET /api/client-portal/documents
 export const getClientDocuments = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { category } = req.query; 
-
+    // We don't necessarily need category from req.query to filter DB, 
+    // we can return all valid docs and let frontend filter tabs.
+    
     const projects = await Project.find({ client: userId }).select('_id milestones');
     const projectIds = projects.map(p => p._id);
 
-    // Build Query: Only specific statuses or types
+    // Build Query: Only specific statuses or types (Hiding 'Waiting for Approval')
     let query = { 
       project: { $in: projectIds },
       $or: [
-        { type: 'Deliverable' }, // Final milestone docs uploaded by Admin
-        { status: { $in: ['Approved', 'Review', 'Pending', 'Revision Requested', 'Rejected'] } } // Items needing client attention
+        { type: 'Deliverable' }, 
+        { status: { $in: ['Approved', 'Review', 'Pending', 'Revision Requested', 'Rejected'] } } 
       ]
     };
 
@@ -167,12 +167,20 @@ export const getClientDocuments = async (req, res) => {
   }
 };
 
+// @desc    Add Comment to Document
 export const addDocumentComment = async (req, res) => {
     try {
         const { text } = req.body;
         const document = await Document.findById(req.params.id);
         if (!document) return res.status(404).json({ message: 'Document not found' });
         
+        // Ensure user is authorized (Client owning the project)
+        // (Assuming basic protection is done, but deeper check is good)
+        const project = await Project.findById(document.project);
+        if (project.client.toString() !== req.user._id.toString()) {
+             return res.status(403).json({ message: 'Not authorized' });
+        }
+
         document.comments.push({ user: req.user._id, text, createdAt: new Date() });
         await document.save();
         res.json(document.comments[document.comments.length - 1]);
@@ -181,6 +189,7 @@ export const addDocumentComment = async (req, res) => {
       }
 };
 
+// @desc    Get Client Finances
 export const getClientFinance = async (req, res) => {
     try {
         const userId = req.user._id;
@@ -212,6 +221,7 @@ export const getClientFinance = async (req, res) => {
       }
 };
 
+// @desc    Get Client Approvals
 export const getClientApprovals = async (req, res) => {
     try {
         const userId = req.user._id;
@@ -220,7 +230,6 @@ export const getClientApprovals = async (req, res) => {
     
         const documents = await Document.find({
           project: { $in: projectIds },
-          // HIDE 'Waiting for Approval' (Internal)
           status: { $in: ['Pending', 'Review', 'Approved', 'Rejected', 'Revision Requested'] }
         })
         .populate('project', 'name')
@@ -244,36 +253,64 @@ export const getClientApprovals = async (req, res) => {
       }
 };
 
+// @desc    Process Approval (Approve/Reject/Revision) + NOTIFICATIONS
 export const updateApprovalStatus = async (req, res) => {
-    try {
-        const { status, feedback } = req.body;
-        const documentId = req.params.id;
-        const userId = req.user._id;
+  try {
+    const { status, feedback } = req.body; // status: 'Approved', 'Rejected', 'Revision Requested'
+    const documentId = req.params.id;
+    const userId = req.user._id;
+
+    const document = await Document.findById(documentId);
+    if (!document) return res.status(404).json({ message: 'Document not found' });
+
+    const project = await Project.findById(document.project);
+    if (!project || project.client.toString() !== userId.toString()) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    document.status = status;
+    if (status === 'Approved') {
+      document.approvedBy = userId;
+      document.approvedDate = new Date();
+    }
+    if (feedback) {
+      document.comments.push({
+        user: userId,
+        text: `[${status}] ${feedback}`,
+        createdAt: new Date()
+      });
+    }
+
+    await document.save();
+
+    // NOTIFICATION TRIGGER: Notify ALL Admins
+    const admins = await User.find({ role: 'admin' });
     
-        const document = await Document.findById(documentId);
-        if (!document) return res.status(404).json({ message: 'Document not found' });
-    
-        const project = await Project.findById(document.project);
-        if (!project || project.client.toString() !== userId.toString()) {
-          return res.status(403).json({ message: 'Not authorized' });
-        }
-    
-        document.status = status;
-        if (status === 'Approved') {
-          document.approvedBy = userId;
-          document.approvedDate = new Date();
-        }
-        if (feedback) {
-          document.comments.push({
-            user: userId,
-            text: `[${status}] ${feedback}`,
-            createdAt: new Date()
-          });
-        }
-    
-        await document.save();
-        res.json({ message: `Document ${status}`, document });
-      } catch (error) {
-        res.status(500).json({ message: 'Server error' });
-      }
+    // Customize message based on status
+    let notifMessage = '';
+    if (status === 'Approved') {
+        notifMessage = `Client ${req.user.name} APPROVED the document "${document.name}".`;
+    } else if (status === 'Revision Requested') {
+        notifMessage = `Client ${req.user.name} requested REVISIONS for "${document.name}".`;
+    } else {
+        notifMessage = `Client ${req.user.name} REJECTED the document "${document.name}".`;
+    }
+
+    const notificationPromises = admins.map(admin => 
+        Notification.create({
+            recipient: admin._id,
+            sender: req.user._id,
+            type: 'Approval Request', 
+            message: notifMessage,
+            relatedId: document._id,
+            onModel: 'Document'
+        })
+    );
+    await Promise.all(notificationPromises);
+
+    res.json({ message: `Document ${status}`, document });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
 };
