@@ -4,14 +4,15 @@ import {
   getTasks,
   updateTask,
   deleteTask,
-  submitTask, // New
-  reviewTask  // New
+  submitTask,
+  reviewTask
 } from '../controller/taskController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 import upload from '../utils/fileUpload.js';
 
 const router = express.Router();
 
+// All task routes require login
 router.use(protect);
 
 router.route('/')
@@ -26,7 +27,7 @@ router.route('/:id')
 router.post(
   '/:id/submit',
   authorize('team_member'),
-  upload.single('document'), // Matches field name in Postman/Frontend
+  upload.single('file'), // Standardized to 'file'
   submitTask
 );
 

@@ -33,8 +33,8 @@ const taskSchema = new mongoose.Schema(
     startDate: Date,
     endDate: Date,
     submission: {
-      docName: String, // e.g., "Pre-Design"
-      docType: String, // e.g., "PDF", "DWG"
+      docName: String, 
+      docType: String, 
       notes: String,
       file: {
         public_id: String,

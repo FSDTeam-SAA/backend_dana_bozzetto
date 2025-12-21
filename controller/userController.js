@@ -1,8 +1,37 @@
 import User from '../model/User.js';
 import { Project } from '../model/Project.js';
 import { Finance } from '../model/Finance.js';
-import { Task } from '../model/Task.js'; // Import Task model for team stats
+import { Task } from '../model/Task.js';
 import { uploadToCloudinary } from '../utils/cloudinary.js';
+import generateToken from '../utils/generateToken.js';
+
+// @desc    Get User Profile (Settings Page)
+// @route   GET /api/users/profile
+// @access  Private
+export const getUserProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (user) {
+      res.json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+        companyName: user.companyName,
+        address: user.address,
+        phoneNumber: user.phoneNumber,
+        employeeId: user.employeeId,
+        clientId: user.clientId
+      });
+    } else {
+      res.status(404).json({ message: 'User not found' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
 
 // @desc    Add a new Team Member (Admin only)
 export const addTeamMember = async (req, res) => {
@@ -20,7 +49,8 @@ export const addTeamMember = async (req, res) => {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
 
-    let avatarData = { public_id: '', url: '' };
+    let avatarData = { public_id: '', url: 'https://via.placeholder.com/150' };
+    
     if (req.file) {
       const result = await uploadToCloudinary(req.file.buffer, 'architectural-portal/avatars');
       avatarData = {
@@ -39,7 +69,7 @@ export const addTeamMember = async (req, res) => {
       employeeId,
       phoneNumber,
       address,
-      avatar: avatarData.url || 'https://via.placeholder.com/150'
+      avatar: avatarData
     });
 
     res.status(201).json({
@@ -70,7 +100,8 @@ export const addClient = async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    let avatarData = { public_id: '', url: '' };
+    let avatarData = { public_id: '', url: 'https://via.placeholder.com/150' };
+    
     if (req.file) {
       const result = await uploadToCloudinary(req.file.buffer, 'architectural-portal/avatars');
       avatarData = { public_id: result.public_id, url: result.secure_url };
@@ -87,7 +118,7 @@ export const addClient = async (req, res) => {
       companyName,
       phoneNumber,
       address,
-      avatar: avatarData.url || 'https://via.placeholder.com/150'
+      avatar: avatarData
     });
 
     res.status(201).json({
@@ -99,6 +130,30 @@ export const addClient = async (req, res) => {
     console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
+};
+
+// @desc    Get all users (Search functionality)
+// @route   GET /api/users?search=john
+// @access  Private
+export const allUsers = async (req, res) => {
+  const keyword = req.query.search
+    ? {
+        $or: [
+          { name: { $regex: req.query.search, $options: 'i' } },
+          { email: { $regex: req.query.search, $options: 'i' } },
+        ],
+      }
+    : {};
+
+  // Find users matching search, excluding the current logged-in user
+  // Note: To avoid errors if req.user is undefined (due to commented out auth), we check first
+  const currentUserId = req.user ? req.user._id : null;
+  
+  const users = await User.find(keyword)
+    .find({ _id: { $ne: currentUserId } })
+    .select('-password');
+    
+  res.send(users);
 };
 
 // @desc    Get all users by role with Project Counts (For Lists)
@@ -191,7 +246,7 @@ export const getClientDashboard = async (req, res) => {
   }
 };
 
-// @desc    Get Full Team Member Dashboard (NEW FEATURE)
+// @desc    Get Full Team Member Dashboard
 // @route   GET /api/users/team-member/:id/dashboard
 // @access  Private
 export const getTeamMemberDashboard = async (req, res) => {
@@ -205,7 +260,6 @@ export const getTeamMemberDashboard = async (req, res) => {
     }
 
     // 2. Fetch Projects assigned to this user
-    // We also select 'teamMembers' so we can show their specific role (e.g. "Designer")
     const projects = await Project.find({ 'teamMembers.user': userId })
       .select('name status startDate endDate teamMembers overallProgress');
 
@@ -252,5 +306,53 @@ export const deleteUser = async (req, res) => {
     res.json({ message: 'User removed' });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc    Update User Profile (Self)
+export const updateUserProfile = async (req, res) => {
+  try {
+    // Check if req.user exists (Auth might be commented out)
+    if (!req.user) {
+        return res.status(401).json({ message: "No user found in request (Auth likely disabled)" });
+    }
+
+    const user = await User.findById(req.user._id);
+
+    if (user) {
+        user.name = req.body.name || user.name;
+        user.email = req.body.email || user.email;
+        user.phoneNumber = req.body.phoneNumber || user.phoneNumber;
+        user.address = req.body.address || user.address;
+        
+        if (req.body.password) {
+        user.password = req.body.password;
+        }
+
+        // Handle Avatar Upload
+        if (req.file) {
+            const result = await uploadToCloudinary(req.file.buffer, 'architectural-portal/avatars');
+            user.avatar = {
+                public_id: result.public_id,
+                url: result.secure_url
+            };
+        }
+
+        const updatedUser = await user.save();
+
+        res.json({
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        avatar: updatedUser.avatar,
+        token: generateToken(updatedUser._id),
+        });
+    } else {
+        res.status(404).json({ message: 'User not found' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };

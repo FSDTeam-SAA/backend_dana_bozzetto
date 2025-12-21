@@ -71,6 +71,9 @@ export const markAllAsRead = async (req, res) => {
   }
 };
 
+// @desc    Delete a notification
+// @route   DELETE /api/notifications/:id
+// @access  Private
 export const deleteNotification = async (req, res) => {
   try {
     const notification = await Notification.findByIdAndDelete(req.params.id);

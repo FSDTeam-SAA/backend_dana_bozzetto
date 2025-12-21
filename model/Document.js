@@ -26,10 +26,11 @@ const documentSchema = new mongoose.Schema(
       url: { type: String, required: true },
       mimeType: { type: String }, 
       size: { type: Number }, 
+      format: { type: String }
     },
     type: {
       type: String,
-      enum: ['PDF', 'DWG', 'JPG', 'PNG', 'Other'],
+      enum: ['PDF', 'DWG', 'JPG', 'PNG', 'Other', 'Deliverable'], 
       default: 'PDF',
     },
     version: {

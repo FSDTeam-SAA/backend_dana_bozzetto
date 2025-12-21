@@ -3,7 +3,7 @@ import User from '../model/User.js';
 import { Document } from '../model/Document.js';
 import { Task } from '../model/Task.js';
 import { Finance } from '../model/Finance.js';
-import { Notification } from '../model/Notification.js'; // Import Notification
+import { Notification } from '../model/Notification.js';
 import { uploadToCloudinary } from '../utils/cloudinary.js';
 
 // @desc    Create a new project
@@ -18,7 +18,7 @@ export const createProject = async (req, res) => {
       startDate,
       endDate,
       status,
-      teamMembers 
+      teamMembers // Array of user IDs or Objects
     } = req.body;
 
     const clientUser = await User.findById(clientId);
@@ -27,6 +27,7 @@ export const createProject = async (req, res) => {
     }
 
     // Process Team Members
+    // Ideally receives: [{ user: 'ID', role: 'Architect' }] or just ['ID', 'ID']
     let formattedTeam = [];
     if (teamMembers) {
       const parsedMembers = typeof teamMembers === 'string' ? JSON.parse(teamMembers) : teamMembers;
@@ -45,6 +46,14 @@ export const createProject = async (req, res) => {
       coverImageData = { public_id: result.public_id, url: result.secure_url };
     }
 
+    // Default Milestones (Standard Architectural Phases)
+    const defaultMilestones = [
+      { name: 'Pre-Design', status: 'Pending', isEnabled: true },
+      { name: 'Schematic Design', status: 'Pending', isEnabled: true },
+      { name: 'Design Development', status: 'Pending', isEnabled: true },
+      { name: 'Construction Documents', status: 'Pending', isEnabled: true }
+    ];
+
     const project = await Project.create({
       projectNo,
       name,
@@ -56,11 +65,14 @@ export const createProject = async (req, res) => {
       status: status || 'Active',
       teamMembers: formattedTeam,
       coverImage: coverImageData,
-      milestones: [{ name: 'Pre-Design', status: 'Pending', isEnabled: true }]
+      milestones: defaultMilestones
     });
 
+    // Handle Initial Documents (if any)
     if (req.files && req.files['documents']) {
+      // Assign to first milestone by default
       const initialMilestone = project.milestones[0];
+      
       const uploadPromises = req.files['documents'].map(async (file) => {
         const result = await uploadToCloudinary(file.buffer, 'architectural-projects/documents');
         return Document.create({
@@ -75,20 +87,20 @@ export const createProject = async (req, res) => {
             size: file.size,
             format: result.format
           },
-          type: result.format === 'pdf' ? 'PDF' : 'Image',
-          status: 'Pending'
+          type: 'Other', // Initial docs are generic
+          status: 'Approved' // Auto-approve admin uploads
         });
       });
       await Promise.all(uploadPromises);
     }
 
-    // NOTIFICATION TRIGGER: Notify Team Members they were added
+    // NOTIFICATION TRIGGER: Notify Team Members
     if (formattedTeam.length > 0) {
         const notificationPromises = formattedTeam.map(member => 
             Notification.create({
                 recipient: member.user,
                 sender: req.user._id,
-                type: 'Message', // Using 'Message' as a generic assignment notification
+                type: 'Message', 
                 message: `You have been assigned to a new project: ${name}`,
                 relatedId: project._id,
                 onModel: 'Project'
@@ -113,13 +125,16 @@ export const getProjects = async (req, res) => {
       } else if (req.user.role === 'team_member') {
         query = { 'teamMembers.user': req.user._id };
       }
+      // Admin filter
       if (req.user.role === 'admin' && req.query.clientId) {
         query.client = req.query.clientId;
       }
 
       const projects = await Project.find(query)
         .populate('client', 'name email avatar')
-        .populate('teamMembers.user', 'name role avatar');
+        .populate('teamMembers.user', 'name role avatar')
+        .sort({ createdAt: -1 });
+
       res.json(projects);
     } catch (error) {
       console.error(error);
@@ -127,39 +142,56 @@ export const getProjects = async (req, res) => {
     }
 };
 
-// @desc    Get Full Project Details
+// @desc    Get Full Project Details (Matches UI Tabs: Overview, Team, Milestones, Documents)
 export const getProjectById = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id)
         .populate('client', 'name email phoneNumber address avatar')
-        .populate('teamMembers.user', 'name email role avatar employeeId');
+        .populate('teamMembers.user', 'name email role avatar employeeId phoneNumber'); // Added phoneNumber for Team tab
       
       if (!project) return res.status(404).json({ message: 'Project not found' });
       
+      // Authorization Check
       if (req.user.role === 'client' && project.client._id.toString() !== req.user._id.toString()) {
           return res.status(403).json({ message: 'Not authorized' });
       }
+      if (req.user.role === 'team_member') {
+          const isMember = project.teamMembers.some(m => m.user._id.toString() === req.user._id.toString());
+          if (!isMember) return res.status(403).json({ message: 'Not authorized' });
+      }
 
+      // Fetch Tasks
       const tasks = await Task.find({ project: project._id })
         .populate('assignedTo', 'name avatar')
         .sort({ endDate: 1 });
 
-      const documents = await Document.find({ project: project._id })
+      // Fetch ALL Documents (Admin/Team see everything)
+      // Clients see specific docs only (Handled in Client Portal, but here we can filter too)
+      let docQuery = { project: project._id };
+      if (req.user.role === 'client') {
+          // Clients only see "Deliverables" (Final Milestone Docs)
+           docQuery.type = 'Deliverable';
+      }
+
+      const documents = await Document.find(docQuery)
         .populate('uploadedBy', 'name role')
         .sort({ createdAt: -1 });
 
-      const financeStats = await Finance.aggregate([
-        { $match: { project: project._id, type: 'Invoice' } },
-        { 
-          $group: {
-            _id: null,
-            totalPaid: { $sum: { $cond: [{ $eq: ['$status', 'Paid'] }, '$totalAmount', 0] } },
-            totalUnpaid: { $sum: { $cond: [{ $ne: ['$status', 'Paid'] }, '$totalAmount', 0] } }
-          }
-        }
-      ]);
-
-      const financials = financeStats.length > 0 ? financeStats[0] : { totalPaid: 0, totalUnpaid: 0 };
+      // Fetch Finance Stats (for Admin/Client)
+      let financeStats = { totalPaid: 0, totalUnpaid: 0 };
+      if (req.user.role !== 'team_member') {
+          const financeAgg = await Finance.aggregate([
+            { $match: { project: project._id, type: 'Invoice' } },
+            { 
+              $group: {
+                _id: null,
+                totalPaid: { $sum: { $cond: [{ $eq: ['$status', 'Paid'] }, '$totalAmount', 0] } },
+                totalUnpaid: { $sum: { $cond: [{ $ne: ['$status', 'Paid'] }, '$totalAmount', 0] } }
+              }
+            }
+          ]);
+          if (financeAgg.length > 0) financeStats = financeAgg[0];
+      }
 
       res.json({
         ...project.toObject(),
@@ -167,8 +199,8 @@ export const getProjectById = async (req, res) => {
         documents,
         financials: {
           totalBudget: project.budget,
-          totalPaid: financials.totalPaid,
-          totalUnpaid: financials.totalUnpaid
+          totalPaid: financeStats.totalPaid,
+          totalUnpaid: financeStats.totalUnpaid
         }
       });
 
@@ -188,15 +220,19 @@ export const updateProject = async (req, res) => {
     }
 };
 
-// @desc    Add a Milestone
+// @desc    Add a Milestone Manually
 export const addMilestone = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id);
       if (!project) return res.status(404).json({ message: 'Project not found' });
       
-      project.milestones.push({ name: req.body.name, status: 'Pending' });
-      await project.save();
+      project.milestones.push({ 
+        name: req.body.name, 
+        status: 'Pending',
+        isEnabled: true 
+      });
       
+      await project.save();
       res.json(project);
     } catch (error) {
       res.status(500).json({ message: error.message });
@@ -235,7 +271,7 @@ export const addTeamMemberToProject = async (req, res) => {
     project.teamMembers.push({ user: userId, role: role || 'Contributor' });
     await project.save();
     
-    // NOTIFICATION TRIGGER: Notify the specific user
+    // NOTIFICATION TRIGGER
     await Notification.create({
         recipient: userId,
         sender: req.user._id,
@@ -245,7 +281,8 @@ export const addTeamMemberToProject = async (req, res) => {
         onModel: 'Project'
     });
 
-    await project.populate('teamMembers.user', 'name role avatar');
+    // Populate and return updated team
+    await project.populate('teamMembers.user', 'name role avatar employeeId');
 
     res.json(project.teamMembers);
   } catch (error) {
@@ -254,7 +291,7 @@ export const addTeamMemberToProject = async (req, res) => {
   }
 };
 
-// @desc    Upload Final Milestone Document (Admin Only)
+// @desc    Upload Final Milestone Document (Admin Only) -> THIS IS WHAT CLIENT SEES
 export const uploadMilestoneDocument = async (req, res) => {
   try {
     const { id, milestoneId } = req.params;
@@ -269,6 +306,7 @@ export const uploadMilestoneDocument = async (req, res) => {
     
     const result = await uploadToCloudinary(req.file.buffer, 'architectural-projects/milestones');
 
+    // Create "Deliverable" Document
     const document = await Document.create({
       name: req.body.name || req.file.originalname,
       project: project._id,
@@ -282,10 +320,14 @@ export const uploadMilestoneDocument = async (req, res) => {
         format: result.format
       },
       type: 'Deliverable', 
-      status: 'Review' 
+      status: 'Review' // Client needs to Review/Approve it
     });
 
+    // Update Milestone Status (Pending -> Completed or In Progress -> Completed)
+    // Note: Admin uploads this when they are ready to complete the milestone
     milestone.status = 'Completed';
+    
+    // Recalculate Overall Progress
     const total = project.milestones.length;
     const completed = project.milestones.filter(m => m.status === 'Completed').length;
     project.overallProgress = Math.round((completed / total) * 100);

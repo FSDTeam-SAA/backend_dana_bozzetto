@@ -10,11 +10,11 @@ export const uploadDocument = async (req, res) => {
     const { 
       projectId, 
       milestoneId, 
-      notes 
+      notes,
+      type // Allow frontend to specify type (e.g. 'DWG')
     } = req.body;
 
     // Check if files exist (Supports both single 'file' or multiple 'files')
-    // We will standardize to an array
     let files = [];
     if (req.files && req.files.length > 0) {
       files = req.files;
@@ -29,6 +29,7 @@ export const uploadDocument = async (req, res) => {
     // Process all files in parallel
     const uploadPromises = files.map(async (file) => {
       // 1. Upload to Cloudinary
+      // Note: For CAD files (DWG), Cloudinary might treat them as 'raw' or 'image' depending on config.
       const result = await uploadToCloudinary(file.buffer, 'architectural-projects/documents');
       
       // 2. Handle Versioning (Find latest version of THIS specific file name in THIS project)
@@ -39,7 +40,19 @@ export const uploadDocument = async (req, res) => {
 
       const nextVersion = existingDoc ? existingDoc.version + 1 : 1;
 
-      // 3. Create Document Record
+      // 3. Determine Document Type
+      let docType = 'Other';
+      if (type) {
+        docType = type;
+      } else {
+        // Auto-detection fallback
+        const fmt = result.format || file.mimetype;
+        if (fmt.includes('pdf')) docType = 'PDF';
+        else if (fmt.match(/jpg|jpeg|png/)) docType = 'JPG'; // Simplified mapping
+        else if (file.originalname.match(/\.(dwg|dxf)$/i)) docType = 'DWG';
+      }
+
+      // 4. Create Document Record
       const newDoc = await Document.create({
         name: file.originalname,
         project: projectId,
@@ -52,7 +65,7 @@ export const uploadDocument = async (req, res) => {
           size: file.size,
           format: result.format
         },
-        type: result.format === 'pdf' ? 'PDF' : 'Image', // Simple type detection
+        type: docType,
         version: nextVersion,
         notes,
         status: 'Pending'
@@ -70,8 +83,7 @@ export const uploadDocument = async (req, res) => {
   }
 };
 
-// ... (Keep getProjectDocuments, updateDocumentStatus, addComment as they were) ...
-
+// @desc    Get all documents for a specific project
 export const getProjectDocuments = async (req, res) => {
     try {
       const { milestoneId } = req.query;
@@ -89,6 +101,7 @@ export const getProjectDocuments = async (req, res) => {
     }
   };
   
+// @desc    Update Document Status
   export const updateDocumentStatus = async (req, res) => {
     try {
       const { status } = req.body;
@@ -108,6 +121,7 @@ export const getProjectDocuments = async (req, res) => {
     }
   };
   
+// @desc    Add Comment to Document
   export const addComment = async (req, res) => {
     try {
       const { text } = req.body;

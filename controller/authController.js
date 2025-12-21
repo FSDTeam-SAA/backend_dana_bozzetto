@@ -1,7 +1,6 @@
 import User from '../model/User.js';
 import generateToken from '../utils/generateToken.js';
-
-// ... (Keep registerUser, loginUser, and getMe exactly as they were) ...
+import { uploadToCloudinary } from '../utils/cloudinary.js';
 
 // @desc    Register a new user
 export const registerUser = async (req, res) => {
@@ -53,6 +52,7 @@ export const loginUser = async (req, res) => {
   try {
     const { emailOrId, password } = req.body; 
 
+    // Allow login with Email, ClientID, or EmployeeID
     const user = await User.findOne({
       $or: [
         { email: emailOrId },
@@ -67,7 +67,7 @@ export const loginUser = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        avatar: user.avatar,
+        avatar: user.avatar, // Now returns the object { public_id, url }
         token: generateToken(user._id),
       });
     } else {
@@ -93,7 +93,7 @@ export const getMe = async (req, res) => {
   }
 };
 
-// @desc    Update user profile (Company Info, Address, etc.)
+// @desc    Update user profile (Company Info, Address, Avatar etc.)
 // @route   PUT /api/auth/profile
 // @access  Private
 export const updateProfile = async (req, res) => {
@@ -107,8 +107,13 @@ export const updateProfile = async (req, res) => {
       user.address = req.body.address || user.address;
       user.phoneNumber = req.body.phoneNumber || user.phoneNumber;
  
-      if (req.body.avatar) {
-        user.avatar = req.body.avatar;
+      // Handle Avatar Upload
+      if (req.file) {
+        const result = await uploadToCloudinary(req.file.buffer, 'architectural-portal/avatars');
+        user.avatar = {
+             public_id: result.public_id,
+             url: result.secure_url
+        };
       }
 
       const updatedUser = await user.save();

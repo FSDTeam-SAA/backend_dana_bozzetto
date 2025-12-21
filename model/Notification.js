@@ -20,7 +20,7 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    // Dynamic Reference: Links to Task, Project, or Document
+    // Dynamic Reference: Links to Task, Project, Document, Finance, or Chat
     relatedId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
@@ -29,7 +29,8 @@ const notificationSchema = new mongoose.Schema(
     onModel: {
       type: String,
       required: true,
-      enum: ['Task', 'Project', 'Document', 'Finance'],
+      // Added 'Chat' to allow linking notifications to chat rooms
+      enum: ['Task', 'Project', 'Document', 'Finance', 'Chat'], 
     },
     isRead: {
       type: Boolean,

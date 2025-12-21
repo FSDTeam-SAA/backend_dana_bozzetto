@@ -1,40 +1,21 @@
 import express from 'express';
-import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import mongoose from 'mongoose';
 import morgan from 'morgan';
 import http from 'http';
-import mainRoutes from './mainroute/index.js';
-import { initSocket } from './utils/socket.js'; // Import the separated logic
 
-// Load environment variables
+// Utils
+import { initSocket } from './utils/socket.js';
+
+// Master Router (Imports all other routes)
+// Ensure your index.js is located at: mainroute/index.js
+import mainRouter from './mainroute/index.js';
+
+// Load env vars
 dotenv.config();
 
-// Initialize Express app
-const app = express();
-
-// Create HTTP server (Wrap Express)
-const server = http.createServer(app);
-
-// Initialize Socket.io (using the separate file)
-const io = initSocket(server);
-
-// Make 'io' accessible globally via req.app.get('io') in controllers
-app.set('io', io);
-
-// Middleware
-// UPDATED: Specific CORS config is required for Socket.io + Frontend credentials
-app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(morgan('dev'));
-
-// Database Connection
+// Connect to Database
 const connectDB = async () => {
   try {
     const conn = await mongoose.connect(process.env.MONGO_URI);
@@ -45,15 +26,35 @@ const connectDB = async () => {
   }
 };
 
-// Routes
-app.use('/api', mainRoutes);
+connectDB();
 
-// Base Route
+const app = express();
+const httpServer = http.createServer(app);
+
+// Initialize Socket.io
+const io = initSocket(httpServer);
+
+// Make io accessible globally in req (e.g., req.app.get('io'))
+app.set('io', io);
+
+// Middleware
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  credentials: true
+}));
+app.use(express.json()); // Body parser
+app.use(morgan('dev'));  // Logging
+
+// Mount Master Router
+// This routes all requests starting with /api to the main router
+app.use('/api', mainRouter);
+
+// Health Check
 app.get('/', (req, res) => {
-  res.send('Architectural Project Management API is running...');
+  res.send('API is running...');
 });
 
-// Global Error Handler
+// Error Handling Middleware
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
   res.status(statusCode);
@@ -63,12 +64,8 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
 const PORT = process.env.PORT || 5000;
 
-connectDB().then(() => {
-  server.listen(PORT, () => {
-    console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-    console.log(`Socket.io is ready for connections`);
-  });
+httpServer.listen(PORT, () => {
+  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });

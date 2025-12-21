@@ -14,7 +14,7 @@ router.use(protect);
 router.use(authorize('admin'));
 
 // @route   GET /api/admin/stats
-// @desc    Get top cards (Total Revenue, Clients, etc.) and Project Status donut chart
+// @desc    Get top cards (Total Revenue, Clients, etc.), Project Status donut chart, Pending Actions
 router.get('/stats', getDashboardStats);
 
 // @route   GET /api/admin/financial-chart

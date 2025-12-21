@@ -1,7 +1,7 @@
 import { Task } from '../model/Task.js';
 import { Project } from '../model/Project.js';
-import { Notification } from '../model/Notification.js'; // Import Notification Model
-import User from '../model/User.js'; // Import User Model to find Admins
+import { Notification } from '../model/Notification.js'; 
+import User from '../model/User.js'; 
 import { uploadToCloudinary } from '../utils/cloudinary.js';
 
 // @desc    Create a new task (Admin or Team)
@@ -51,10 +51,11 @@ export const getTasks = async (req, res) => {
   }
 };
 
-// @desc    Submit Task for Approval (Team Member)
+// @desc    Submit Task for Approval (Team Member) - Uploads file
 export const submitTask = async (req, res) => {
   try {
     const taskId = req.params.id;
+    // Matches fields from your "Upload Document" UI Modal
     const { docName, docType, notes } = req.body; 
 
     const task = await Task.findById(taskId);
@@ -74,8 +75,8 @@ export const submitTask = async (req, res) => {
     }
 
     task.submission = {
-      docName,
-      docType,
+      docName, // e.g. "Pre-Design"
+      docType, // e.g. "PDF", "DWG"
       notes,
       file: fileData,
       submittedBy: req.user._id,
@@ -106,7 +107,7 @@ export const submitTask = async (req, res) => {
   }
 };
 
-// @desc    Review Task (Admin) - Approve/Reject AND Auto-Complete Milestone
+// @desc    Review Task (Admin) - Approve/Reject AND Check Milestone Completion
 export const reviewTask = async (req, res) => {
   try {
     const taskId = req.params.id;
@@ -118,32 +119,35 @@ export const reviewTask = async (req, res) => {
     if (status === 'Approved') {
       task.status = 'Completed';
       
-      // Auto-Complete Milestone Logic
+      // LOGIC: Check if ALL tasks in this milestone are now completed
+      // 1. Find all tasks for this project & milestone
       const milestoneTasks = await Task.find({ 
         project: task.project, 
         milestoneId: task.milestoneId 
       });
 
+      // 2. Filter for any that are NOT completed (excluding the current one we just approved)
       const pendingTasks = milestoneTasks.filter(t => 
         t._id.toString() !== taskId && t.status !== 'Completed'
       );
 
+      // 3. If no pending tasks, mark Milestone as "Completed" (Internal Logic)
+      // Note: The Admin still needs to upload the "Final Deliverable" manually in the Project Controller
+      // but we can update the status here to reflect progress.
       if (pendingTasks.length === 0) {
         const project = await Project.findById(task.project);
         if (project) {
           const milestone = project.milestones.id(task.milestoneId);
           if (milestone) {
-             milestone.status = 'Completed';
-             const totalMilestones = project.milestones.length;
-             const completedMilestones = project.milestones.filter(m => m.status === 'Completed').length;
-             project.overallProgress = totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0;
-             await project.save();
+             // milestone.status = 'Completed'; // Optional: Or keep it pending until Admin uploads final doc
+             // For now, let's leave milestone status management to the "Upload Milestone Document" action
+             // to ensure the Client doesn't see a "Completed" milestone without a document.
           }
         }
       }
 
     } else if (status === 'Rejected') {
-      task.status = 'In Progress'; 
+      task.status = 'In Progress'; // Send back to team member
       task.adminFeedback = feedback; 
     } else {
       return res.status(400).json({ message: 'Invalid status' });

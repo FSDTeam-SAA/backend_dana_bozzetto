@@ -4,8 +4,11 @@ import {
   addClient,
   getUsersByRole,
   getClientDashboard,
-  getTeamMemberDashboard, // Import the new function
-  deleteUser
+  getTeamMemberDashboard,
+  deleteUser,
+  allUsers,
+  updateUserProfile,
+  getUserProfile
 } from '../controller/userController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 import upload from '../utils/fileUpload.js';
@@ -36,6 +39,7 @@ router.post(
   upload.single('avatar'), 
   addTeamMember
 );
+
 // @route   POST /api/users/client
 // @desc    Create Client (Admin only, supports Avatar upload)
 router.post(
@@ -44,9 +48,14 @@ router.post(
   upload.single('avatar'), 
   addClient
 );
+
+// User Profile (Settings)
+router.route('/profile')
+  .get(getUserProfile)
+  .put(upload.single('avatar'), updateUserProfile); // Allow avatar upload
+  
 // @route   DELETE /api/users/:id
 // @desc    Delete a user (Admin only)
 router.delete('/:id', authorize('admin'), deleteUser);
 
 export default router;
-

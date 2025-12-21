@@ -7,7 +7,7 @@ import {
   deleteProject,
   addMilestone,
   addTeamMemberToProject,
-  uploadMilestoneDocument // Import the new function
+  uploadMilestoneDocument
 } from '../controller/projectController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 import upload from '../utils/fileUpload.js';
@@ -41,7 +41,7 @@ router.route('/:id/milestones')
 router.route('/:id/milestones/:milestoneId/upload')
   .post(
     authorize('admin'),
-    upload.single('document'), // Field name must be 'document'
+    upload.single('file'), // Frontend must append data to 'file' key
     uploadMilestoneDocument
   );
 

@@ -10,7 +10,7 @@ const financeSchema = new mongoose.Schema(
     customId: {
       type: String,
       required: true,
-      unique: true, 
+      unique: true,
       trim: true,
     },
     project: {
@@ -25,7 +25,7 @@ const financeSchema = new mongoose.Schema(
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User', 
+      ref: 'User',
       required: true,
     },
     lineItems: [
@@ -33,7 +33,7 @@ const financeSchema = new mongoose.Schema(
         description: { type: String, required: true },
         quantity: { type: Number, required: true, default: 1 },
         rate: { type: Number, required: true },
-        amount: { type: Number, required: true }, 
+        amount: { type: Number, required: true },
         _id: false,
       }
     ],
@@ -57,13 +57,12 @@ const financeSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-    // Dates
     issueDate: {
       type: Date,
       default: Date.now,
     },
     dueDate: {
-      type: Date, 
+      type: Date,
     },
     status: {
       type: String,
@@ -84,8 +83,8 @@ const financeSchema = new mongoose.Schema(
       type: String,
     },
     file: {
-      public_id: String,
-      url: String,
+      public_id: { type: String },
+      url: { type: String },
     },
   },
   {

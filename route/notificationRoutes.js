@@ -2,7 +2,8 @@ import express from 'express';
 import {
   getNotifications,
   markAsRead,
-  markAllAsRead
+  markAllAsRead,
+  deleteNotification
 } from '../controller/notificationController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -21,5 +22,9 @@ router.put('/:id/read', markAsRead);
 // @route   PUT /api/notifications/read-all
 // @desc    Mark all notifications as read
 router.put('/read-all', markAllAsRead);
+
+// @route   DELETE /api/notifications/:id
+// @desc    Delete a notification
+router.delete('/:id', deleteNotification);
 
 export default router;

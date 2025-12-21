@@ -80,8 +80,15 @@ export const createGroupChat = async (req, res) => {
     return res.status(400).send({ message: 'Please fill all the fields' });
   }
 
-  // Frontend sends stringified array of userIds
-  var users = JSON.parse(req.body.users);
+  // Fix: Handle both JSON Array and Stringified Array (FormData)
+  let users = req.body.users;
+  if (typeof users === 'string') {
+      try {
+        users = JSON.parse(users);
+      } catch (error) {
+        return res.status(400).send({ message: 'Invalid users array format' });
+      }
+  }
 
   if (users.length < 2) {
     return res.status(400).send({ message: 'More than 2 users are required to form a group chat' });

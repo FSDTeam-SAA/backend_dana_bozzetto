@@ -17,13 +17,11 @@ const projectSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    // Relationship: Client
     client: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: [true, "A project must have a client"],
     },
-    // Relationship: Team Members
     teamMembers: [
       {
         user: {
@@ -42,8 +40,6 @@ const projectSchema = new mongoose.Schema(
       enum: ['Active', 'Pending', 'Completed', 'On Hold', 'Archived'],
       default: 'Active',
     },
-    // REMOVED 'location' field to match Figma design
-    
     budget: {
       type: Number,
       default: 0,
@@ -105,7 +101,7 @@ projectSchema.virtual('tasks', {
 });
 
 projectSchema.virtual('invoices', {
-  ref: 'Invoice',
+  ref: 'Finance',
   localField: '_id',
   foreignField: 'project',
 });

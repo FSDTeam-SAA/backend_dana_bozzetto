@@ -20,16 +20,20 @@ export const createFinance = async (req, res) => {
     } = req.body;
 
     // 1. Generate a Custom ID (e.g. INV-2025-001)
+    // Note: Using countDocuments is simple but can have race conditions in high traffic. 
+    // For this app, it's acceptable.
     const count = await Finance.countDocuments({ type });
     const year = new Date().getFullYear();
     const shortType = type === 'Invoice' ? 'INV' : type === 'Estimate' ? 'EST' : type === 'Contract' ? 'CNT' : 'PROP';
     const customId = `${shortType}-${year}-${String(count + 1).padStart(3, '0')}`;
 
-    // 2. Calculate Totals (Backend validation)
+    // 2. Calculate Totals (Backend validation to prevent frontend math errors)
     let subtotal = 0;
-    lineItems.forEach(item => {
-      subtotal += item.quantity * item.rate;
-    });
+    if (Array.isArray(lineItems)) {
+        lineItems.forEach(item => {
+        subtotal += (item.quantity || 0) * (item.rate || 0);
+        });
+    }
     
     const taxAmount = subtotal * ((taxRate || 0) / 100);
     const totalAmount = subtotal + taxAmount - (discount || 0);
@@ -101,11 +105,16 @@ export const getFinanceById = async (req, res) => {
   try {
     const finance = await Finance.findById(req.params.id)
       .populate('client', 'name email address phoneNumber')
-      .populate('project', 'name location')
+      .populate('project', 'name description') // 'location' removed from schema earlier
       .populate('createdBy', 'name email');
 
     if (!finance) {
       return res.status(404).json({ message: 'Record not found' });
+    }
+
+    // Security Check
+    if (req.user.role === 'client' && finance.client._id.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: 'Not authorized' });
     }
 
     res.json(finance);
@@ -136,11 +145,18 @@ export const updateFinanceStatus = async (req, res) => {
     finance.status = status;
     await finance.save();
 
-    // If Invoice is Paid, update Project's "Total Paid"
-    if (status === 'Paid' && finance.type === 'Invoice') {
+    // RECALCULATE PROJECT TOTALS
+    // If it's an Invoice, we must ensure the Project's "totalPaid" is accurate.
+    // Instead of just adding/subtracting, we aggregate to be safe against double-clicks/logic errors.
+    if (finance.type === 'Invoice') {
         const project = await Project.findById(finance.project);
         if (project) {
-            project.totalPaid += finance.totalAmount;
+            const stats = await Finance.aggregate([
+                { $match: { project: project._id, type: 'Invoice', status: 'Paid' } },
+                { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+            ]);
+            
+            project.totalPaid = stats.length > 0 ? stats[0].total : 0;
             await project.save();
         }
     }
