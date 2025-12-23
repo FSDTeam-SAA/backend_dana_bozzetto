@@ -27,13 +27,11 @@ const userSchema = new mongoose.Schema({
     enum: ['client', 'team_member', 'admin'],
     default: 'client',
   },
-  // Specific to Team Members
   employeeId: {
     type: String,
     unique: true,
     sparse: true, 
   },
-  // Specific to Clients
   clientId: {
     type: String,
     unique: true,
@@ -48,7 +46,6 @@ const userSchema = new mongoose.Schema({
   phoneNumber: {
     type: String,
   },
-  // FIXED: Changed from String to Object to support Cloudinary
   avatar: {
     public_id: {
       type: String,
@@ -56,8 +53,12 @@ const userSchema = new mongoose.Schema({
     },
     url: {
       type: String,
-      default: 'https://via.placeholder.com/150' // Default placeholder URL
+      default: 'https://via.placeholder.com/150' 
     }
+  },
+  isVerified: {
+    type: Boolean,
+    default: false, 
   },
   resetPasswordToken: String,
   resetPasswordExpire: Date,
@@ -65,7 +66,6 @@ const userSchema = new mongoose.Schema({
   timestamps: true,
 });
 
-// Encrypt password using bcrypt
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     next();
@@ -74,7 +74,6 @@ userSchema.pre('save', async function (next) {
   this.password = await bcrypt.hash(this.password, salt);
 });
 
-// Match user entered password to hashed password in database
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };

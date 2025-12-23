@@ -4,7 +4,6 @@ import { uploadToCloudinary } from '../utils/cloudinary.js';
 import sendEmail from '../utils/sendEmail.js';
 import crypto from 'crypto';
 
-// @desc    Register a new user
 export const registerUser = async (req, res) => {
   try {
     const { name, email, password, role, clientId, employeeId, address, phoneNumber } = req.body;
@@ -21,6 +20,8 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'Employee ID is required for team members' });
     }
 
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
     const user = await User.create({
       name,
       email,
@@ -29,17 +30,29 @@ export const registerUser = async (req, res) => {
       clientId,
       employeeId,
       address,
-      phoneNumber
+      phoneNumber,
+      isVerified: false, 
+      resetPasswordToken: otp, 
+      resetPasswordExpire: Date.now() + 10 * 60 * 1000
     });
 
     if (user) {
-      res.status(201).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        token: generateToken(user._id, false), // Default: No remember me on register
-      });
+      try {
+        await sendEmail({
+            email: user.email,
+            subject: 'Verify Your Email',
+            message: `Your Email Verification OTP is: ${otp}`,
+            otp: otp
+        });
+        
+        res.status(201).json({ 
+            message: 'User registered successfully. OTP sent to email. Please verify to login.',
+            email: user.email 
+        });
+      } catch (err) {
+        console.error("Email send failed:", err);
+        return res.status(201).json({ message: 'User created but failed to send OTP email. Please contact support.' });
+      }
     } else {
       res.status(400).json({ message: 'Invalid user data' });
     }
@@ -49,12 +62,44 @@ export const registerUser = async (req, res) => {
   }
 };
 
-// @desc    Auth user & get token (Login)
+export const verifyEmailOtp = async (req, res) => {
+    const { email, otp } = req.body;
+
+    try {
+        const user = await User.findOne({
+            email,
+            resetPasswordToken: otp,
+            resetPasswordExpire: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid or Expired OTP' });
+        }
+
+        user.isVerified = true;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+        await user.save();
+
+        res.json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            avatar: user.avatar,
+            token: generateToken(user._id, false),
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+
 export const loginUser = async (req, res) => {
   try {
     const { emailOrId, password, rememberMe } = req.body; 
 
-    // Allow login with Email, ClientID, or EmployeeID
     const user = await User.findOne({
       $or: [
         { email: emailOrId },
@@ -64,15 +109,18 @@ export const loginUser = async (req, res) => {
     }).select('+password');
 
     if (user && (await user.matchPassword(password))) {
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        // Pass rememberMe boolean (true = 30 days, false = 1 day)
-        token: generateToken(user._id, rememberMe),
-      });
+        if (user.isVerified === false) {
+            return res.status(401).json({ message: 'Email not verified. Please verify your account.' });
+        }
+
+        res.json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            avatar: user.avatar,
+            token: generateToken(user._id, rememberMe),
+        });
     } else {
       res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -96,7 +144,6 @@ export const getMe = async (req, res) => {
   }
 };
 
-// @desc    Update user profile
 export const updateProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -108,7 +155,6 @@ export const updateProfile = async (req, res) => {
       user.address = req.body.address || user.address;
       user.phoneNumber = req.body.phoneNumber || user.phoneNumber;
  
-      // Handle Avatar Upload
       if (req.file) {
         const result = await uploadToCloudinary(req.file.buffer, 'architectural-portal/avatars');
         user.avatar = {
@@ -139,7 +185,6 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-// @desc    Change Password (LoggedIn)
 export const changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
@@ -159,18 +204,11 @@ export const changePassword = async (req, res) => {
   }
 };
 
-// =========================================================================
-// FORGOT PASSWORD FLOW (OTP - EMAIL ONLY)
-// =========================================================================
 
-// @desc    Forgot Password - Send OTP via Email
-// @route   POST /api/auth/forgot-password
-// @access  Public
 export const forgotPassword = async (req, res) => {
-  const { contact } = req.body; // Expecting Email
+  const { contact } = req.body; 
 
   try {
-    // Check if input looks like an email
     const isEmail = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(contact);
     
     if (!isEmail) {
@@ -183,20 +221,17 @@ export const forgotPassword = async (req, res) => {
       return res.status(404).json({ message: 'User not found with this email' });
     }
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store OTP in DB
     user.resetPasswordToken = otp;
-    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 Minutes
+    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
 
     await user.save({ validateBeforeSave: false });
 
-    // Send via Email (Uses Nodemailer)
     try {
         await sendEmail({
             email: user.email,
-            subject: 'Your Password Reset Code',
+            subject: 'Reset Password OTP',
             message: `Your OTP is: ${otp}`,
             otp: otp
         });
@@ -213,19 +248,10 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-// @desc    Verify OTP
-// @route   POST /api/auth/verify-otp
-// @access  Public
 export const verifyOtp = async (req, res) => {
-    const { contact, otp } = req.body; // contact represents email
+    const { contact, otp } = req.body; 
 
     try {
-        // Enforce email check
-        const isEmail = /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(contact);
-        if (!isEmail) {
-             return res.status(400).json({ message: 'Invalid email format' });
-        }
-
         const user = await User.findOne({
             email: contact,
             resetPasswordToken: otp,
@@ -236,16 +262,12 @@ export const verifyOtp = async (req, res) => {
             return res.status(400).json({ message: 'Invalid or Expired OTP' });
         }
 
-        // OTP is correct
         res.status(200).json({ message: 'OTP Verified', userId: user._id });
     } catch (error) {
         res.status(500).json({ message: 'Server error' });
     }
 };
 
-// @desc    Reset Password
-// @route   PUT /api/auth/reset-password
-// @access  Public
 export const resetPassword = async (req, res) => {
     const { userId, newPassword, confirmPassword } = req.body;
 
@@ -258,11 +280,8 @@ export const resetPassword = async (req, res) => {
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
-
-        // Set new password
-        user.password = newPassword;
         
-        // Clear OTP fields
+        user.password = newPassword;
         user.resetPasswordToken = undefined;
         user.resetPasswordExpire = undefined;
 
