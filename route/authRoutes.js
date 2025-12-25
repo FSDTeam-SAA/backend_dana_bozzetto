@@ -1,14 +1,14 @@
 import express from 'express';
 import { 
   registerUser, 
-  verifyEmailOtp, // New import
+  verifyEmailOtp,
   loginUser, 
   getMe,
   updateProfile,
   changePassword,
-  forgotPassword, // New import
-  verifyOtp,      // New import
-  resetPassword   // New import
+  forgotPassword,
+  verifyOtp,   
+  resetPassword 
 } from '../controller/authController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import upload from '../utils/fileUpload.js';
