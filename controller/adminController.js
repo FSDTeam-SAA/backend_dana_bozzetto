@@ -40,7 +40,6 @@ export const getDashboardStats = async (req, res) => {
     };
 
     projectStatusRaw.forEach(item => {
-      // Remove spaces for key matching (e.g., "On Hold" -> "OnHold")
       const statusKey = item._id.replace(/\s+/g, ''); 
       if (projectStatus[statusKey] !== undefined) {
         projectStatus[statusKey] = item.count;

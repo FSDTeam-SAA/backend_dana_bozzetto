@@ -69,7 +69,8 @@ export const addTeamMember = async (req, res) => {
       employeeId,
       phoneNumber,
       address,
-      avatar: avatarData
+      avatar: avatarData,
+      isVerified: true // Admin created users are auto-verified
     });
 
     res.status(201).json({
@@ -118,7 +119,8 @@ export const addClient = async (req, res) => {
       companyName,
       phoneNumber,
       address,
-      avatar: avatarData
+      avatar: avatarData,
+      isVerified: true // Admin created users are auto-verified
     });
 
     res.status(201).json({
@@ -145,8 +147,6 @@ export const allUsers = async (req, res) => {
       }
     : {};
 
-  // Find users matching search, excluding the current logged-in user
-  // Note: To avoid errors if req.user is undefined (due to commented out auth), we check first
   const currentUserId = req.user ? req.user._id : null;
   
   const users = await User.find(keyword)
@@ -312,7 +312,6 @@ export const deleteUser = async (req, res) => {
 // @desc    Update User Profile (Self)
 export const updateUserProfile = async (req, res) => {
   try {
-    // Check if req.user exists (Auth might be commented out)
     if (!req.user) {
         return res.status(401).json({ message: "No user found in request (Auth likely disabled)" });
     }
@@ -329,7 +328,6 @@ export const updateUserProfile = async (req, res) => {
         user.password = req.body.password;
         }
 
-        // Handle Avatar Upload
         if (req.file) {
             const result = await uploadToCloudinary(req.file.buffer, 'architectural-portal/avatars');
             user.avatar = {
@@ -350,6 +348,53 @@ export const updateUserProfile = async (req, res) => {
         });
     } else {
         res.status(404).json({ message: 'User not found' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// @desc    Update Any User by ID (Admin Only) -> NEW FEATURE
+export const updateUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (user) {
+      // Update fields if provided in request body
+      user.name = req.body.name || user.name;
+      user.email = req.body.email || user.email;
+      user.companyName = req.body.companyName || user.companyName;
+      user.address = req.body.address || user.address;
+      user.phoneNumber = req.body.phoneNumber || user.phoneNumber;
+      user.employeeId = req.body.employeeId || user.employeeId;
+      user.clientId = req.body.clientId || user.clientId;
+      user.role = req.body.role || user.role;
+
+      // Handle Avatar Upload by Admin
+      if (req.file) {
+        const result = await uploadToCloudinary(req.file.buffer, 'architectural-portal/avatars');
+        user.avatar = {
+             public_id: result.public_id,
+             url: result.secure_url
+        };
+      }
+
+      const updatedUser = await user.save();
+
+      res.json({
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        companyName: updatedUser.companyName,
+        address: updatedUser.address,
+        phoneNumber: updatedUser.phoneNumber,
+        avatar: updatedUser.avatar,
+        // No token returned here because Admin is editing someone else
+      });
+    } else {
+      res.status(404).json({ message: 'User not found' });
     }
   } catch (error) {
     console.error(error);
