@@ -9,8 +9,35 @@ export const registerUser = async (req, res) => {
     const { name, email, password, role, clientId, employeeId, address, phoneNumber } = req.body;
 
     const userExists = await User.findOne({ email });
-    if (userExists) {
+
+    if (userExists && userExists.isVerified) {
       return res.status(400).json({ message: 'User already exists' });
+    }
+
+    if (userExists && !userExists.isVerified) {
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        userExists.resetPasswordToken = otp;
+        userExists.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
+
+        if (name) userExists.name = name;
+        if (password) userExists.password = password; 
+        
+        await userExists.save();
+
+        try {
+            await sendEmail({
+                email: userExists.email,
+                subject: 'Verify Your Email (Resend)',
+                message: `Your new Email Verification OTP is: ${otp}`,
+                otp: otp
+            });
+            return res.status(200).json({ 
+                message: 'Account exists but was not verified. A new OTP has been sent.',
+                email: userExists.email 
+            });
+        } catch (err) {
+            return res.status(500).json({ message: 'Failed to send OTP email.' });
+        }
     }
 
     if (role === 'client' && !clientId) {
@@ -51,7 +78,7 @@ export const registerUser = async (req, res) => {
         });
       } catch (err) {
         console.error("Email send failed:", err);
-        return res.status(201).json({ message: 'User created but failed to send OTP email. Please contact support.' });
+        return res.status(201).json({ message: 'User created but failed to send OTP email. Try logging in to resend.' });
       }
     } else {
       res.status(400).json({ message: 'Invalid user data' });
@@ -62,7 +89,6 @@ export const registerUser = async (req, res) => {
   }
 };
 
-// @route   POST /api/auth/verify-email
 export const verifyEmailOtp = async (req, res) => {
     const { email, otp } = req.body;
 
@@ -88,8 +114,8 @@ export const verifyEmailOtp = async (req, res) => {
         res.cookie('jwt', refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV !== 'development',
-            sameSite: 'strict', 
-            maxAge: 30 * 24 * 60 * 60 * 1000, 
+            sameSite: 'strict',
+            maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
         res.json({
@@ -106,6 +132,7 @@ export const verifyEmailOtp = async (req, res) => {
     }
 };
 
+
 export const loginUser = async (req, res) => {
   try {
     const { emailOrId, password, rememberMe } = req.body; 
@@ -120,18 +147,37 @@ export const loginUser = async (req, res) => {
 
     if (user && (await user.matchPassword(password))) {
         if (user.isVerified === false) {
-            return res.status(401).json({ message: 'Email not verified. Please verify your account.' });
+            const otp = Math.floor(100000 + Math.random() * 900000).toString();
+            user.resetPasswordToken = otp;
+            user.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
+            await user.save();
+
+            try {
+                await sendEmail({
+                    email: user.email,
+                    subject: 'Verify Your Email (Login Attempt)',
+                    message: `Your Verification OTP is: ${otp}`,
+                    otp: otp
+                });
+            } catch (err) {
+                console.error("Failed to resend OTP on login", err);
+            }
+
+            return res.status(403).json({ 
+                message: 'Email not verified. A new OTP has been sent to your email.',
+                requiresVerification: true, 
+                email: user.email
+            });
         }
 
         const accessToken = generateToken(user._id);
-
         const refreshToken = generateRefreshToken(user._id, rememberMe);
 
         res.cookie('jwt', refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV !== 'development',
             sameSite: 'strict',
-            maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000, 
+            maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
         });
 
         res.json({
@@ -140,7 +186,7 @@ export const loginUser = async (req, res) => {
             email: user.email,
             role: user.role,
             avatar: user.avatar,
-            token: accessToken, 
+            token: accessToken,
         });
     } else {
       res.status(401).json({ message: 'Invalid credentials' });
@@ -152,8 +198,6 @@ export const loginUser = async (req, res) => {
 };
 
 // @desc    Refresh Access Token
-// @route   POST /api/auth/refresh
-// @access  Public (Uses Cookie)
 export const refreshToken = async (req, res) => {
     const cookies = req.cookies;
 
@@ -163,7 +207,6 @@ export const refreshToken = async (req, res) => {
 
     try {
         const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
-
         const user = await User.findById(decoded.userId);
         if (!user) return res.status(401).json({ message: 'User not found' });
 
@@ -201,6 +244,7 @@ export const getMe = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
 
 export const updateProfile = async (req, res) => {
   try {
@@ -261,7 +305,6 @@ export const changePassword = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
-
 
 export const forgotPassword = async (req, res) => {
   const { contact } = req.body; 
