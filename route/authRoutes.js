@@ -1,14 +1,16 @@
 import express from 'express';
 import { 
   registerUser, 
-  verifyEmailOtp,
+  verifyEmailOtp, 
   loginUser, 
+  refreshToken, 
+  logoutUser,    
   getMe,
   updateProfile,
   changePassword,
-  forgotPassword,
-  verifyOtp,   
-  resetPassword 
+  forgotPassword, 
+  verifyOtp,      
+  resetPassword   
 } from '../controller/authController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import upload from '../utils/fileUpload.js';
@@ -16,12 +18,14 @@ import upload from '../utils/fileUpload.js';
 const router = express.Router();
 
 router.post('/register', registerUser);
-router.post('/verify-email', verifyEmailOtp);
+router.post('/verify-email', verifyEmailOtp); 
 router.post('/login', loginUser);
 
+router.get('/refresh', refreshToken); 
+router.post('/logout', logoutUser);
 
 router.post('/forgot-password', forgotPassword); 
-router.post('/verify-otp', verifyOtp);         
+router.post('/verify-otp', verifyOtp);           
 router.put('/reset-password', resetPassword);    
 
 router.get('/me', protect, getMe);

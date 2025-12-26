@@ -4,12 +4,12 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import morgan from 'morgan';
 import http from 'http';
+import cookieParser from 'cookie-parser'; // Import Cookie Parser
 
 // Utils
 import { initSocket } from './utils/socket.js';
 
 // Master Router (Imports all other routes)
-// Ensure your index.js is located at: mainroute/index.js
 import mainRouter from './mainroute/index.js';
 
 // Load env vars
@@ -40,9 +40,10 @@ app.set('io', io);
 // Middleware
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:3000",
-  credentials: true
+  credentials: true // Vital for cookies to work with CORS
 }));
 app.use(express.json()); // Body parser
+app.use(cookieParser()); // Cookie parser middleware
 app.use(morgan('dev'));  // Logging
 
 // Mount Master Router

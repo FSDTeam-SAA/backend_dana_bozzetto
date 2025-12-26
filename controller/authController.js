@@ -1,8 +1,8 @@
 import User from '../model/User.js';
-import generateToken from '../utils/generateToken.js';
+import generateToken, { generateRefreshToken } from '../utils/generateToken.js';
 import { uploadToCloudinary } from '../utils/cloudinary.js';
 import sendEmail from '../utils/sendEmail.js';
-import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 
 export const registerUser = async (req, res) => {
   try {
@@ -32,8 +32,8 @@ export const registerUser = async (req, res) => {
       address,
       phoneNumber,
       isVerified: false, 
-      resetPasswordToken: otp, 
-      resetPasswordExpire: Date.now() + 10 * 60 * 1000
+      resetPasswordToken: otp,
+      resetPasswordExpire: Date.now() + 10 * 60 * 1000 
     });
 
     if (user) {
@@ -62,6 +62,7 @@ export const registerUser = async (req, res) => {
   }
 };
 
+// @route   POST /api/auth/verify-email
 export const verifyEmailOtp = async (req, res) => {
     const { email, otp } = req.body;
 
@@ -81,20 +82,29 @@ export const verifyEmailOtp = async (req, res) => {
         user.resetPasswordExpire = undefined;
         await user.save();
 
+        const accessToken = generateToken(user._id);
+        const refreshToken = generateRefreshToken(user._id);
+
+        res.cookie('jwt', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV !== 'development',
+            sameSite: 'strict', 
+            maxAge: 30 * 24 * 60 * 60 * 1000, 
+        });
+
         res.json({
             _id: user._id,
             name: user.name,
             email: user.email,
             role: user.role,
             avatar: user.avatar,
-            token: generateToken(user._id, false),
+            token: accessToken,
         });
 
     } catch (error) {
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
-
 
 export const loginUser = async (req, res) => {
   try {
@@ -113,13 +123,24 @@ export const loginUser = async (req, res) => {
             return res.status(401).json({ message: 'Email not verified. Please verify your account.' });
         }
 
+        const accessToken = generateToken(user._id);
+
+        const refreshToken = generateRefreshToken(user._id, rememberMe);
+
+        res.cookie('jwt', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV !== 'development',
+            sameSite: 'strict',
+            maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000, 
+        });
+
         res.json({
             _id: user._id,
             name: user.name,
             email: user.email,
             role: user.role,
             avatar: user.avatar,
-            token: generateToken(user._id, rememberMe),
+            token: accessToken, 
         });
     } else {
       res.status(401).json({ message: 'Invalid credentials' });
@@ -128,6 +149,43 @@ export const loginUser = async (req, res) => {
     console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
+};
+
+// @desc    Refresh Access Token
+// @route   POST /api/auth/refresh
+// @access  Public (Uses Cookie)
+export const refreshToken = async (req, res) => {
+    const cookies = req.cookies;
+
+    if (!cookies?.jwt) return res.status(401).json({ message: 'Unauthorized, no refresh token' });
+
+    const refreshToken = cookies.jwt;
+
+    try {
+        const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+
+        const user = await User.findById(decoded.userId);
+        if (!user) return res.status(401).json({ message: 'User not found' });
+
+        const accessToken = generateToken(user._id);
+
+        res.json({ token: accessToken });
+    } catch (error) {
+        return res.status(403).json({ message: 'Forbidden, invalid refresh token' });
+    }
+};
+
+export const logoutUser = (req, res) => {
+    const cookies = req.cookies;
+    if (!cookies?.jwt) return res.sendStatus(204); 
+
+    res.clearCookie('jwt', {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV !== 'development',
+    });
+    
+    res.json({ message: 'Logged out successfully' });
 };
 
 export const getMe = async (req, res) => {
@@ -224,7 +282,7 @@ export const forgotPassword = async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
     user.resetPasswordToken = otp;
-    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
+    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; 
 
     await user.save({ validateBeforeSave: false });
 
