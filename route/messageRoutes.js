@@ -1,18 +1,22 @@
 import express from 'express';
-import { allMessages, sendMessage } from '../controller/messageController.js';
+import { 
+  allMessages, 
+  sendMessage, 
+  markAsRead // New Import
+} from '../controller/messageController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// Protect all routes (Need req.user for messaging)
 router.use(protect);
 
 // @route   GET /api/messages/:chatId
-// @desc    Fetch all messages for a specific chat
 router.get('/:chatId', allMessages);
 
 // @route   POST /api/messages
-// @desc    Send a new message
 router.post('/', sendMessage);
+
+// @route   PUT /api/messages/:chatId/read
+router.put('/:chatId/read', markAsRead);
 
 export default router;
