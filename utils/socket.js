@@ -1,4 +1,5 @@
 import { Server } from 'socket.io';
+import jwt from 'jsonwebtoken'; 
 
 export const initSocket = (httpServer) => {
   const io = new Server(httpServer, {
@@ -10,41 +11,51 @@ export const initSocket = (httpServer) => {
     },
   });
 
+  io.use((socket, next) => {
+
+    let token = socket.handshake.auth.token || socket.handshake.query.token;
+
+    if (!token) {
+      return next(new Error("Authentication error: No token provided"));
+    }
+
+    if (token.startsWith('Bearer ')) {
+        token = token.slice(7, token.length).trimLeft();
+    }
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      socket.user = decoded; 
+      next();
+    } catch (err) {
+      return next(new Error("Authentication error: Invalid token"));
+    }
+  });
+
   io.on('connection', (socket) => {
-    console.log('Connected to socket.io:', socket.id);
 
-    // 1. Setup User Room (Login)
-    // Frontend should emit 'setup' with user data after login
-    socket.on('setup', (userData) => {
-      socket.join(userData._id);
-      console.log(`User joined personal room: ${userData._id}`);
-      socket.emit('connected');
-    });
+    const userId = socket.user.userId;
+    socket.join(userId);
+    
+    console.log(`Socket connected: ${socket.id} for User: ${userId}`);
+    socket.emit('connected');
 
-    // 2. Join Chat Room
-    // Frontend emits this when entering a specific chat page
     socket.on('join chat', (room) => {
       socket.join(room);
-      console.log(`User joined chat room: ${room}`);
+      console.log(`User ${userId} joined chat room: ${room}`);
     });
 
-    // 3. Typing Indicators
     socket.on('typing', (room) => socket.in(room).emit('typing'));
     socket.on('stop typing', (room) => socket.in(room).emit('stop typing'));
 
-    // 4. New Message Handling
-    // (Note: The MessageController also emits 'message received', 
-    // but this listener enables client-to-client echoing if needed)
     socket.on('new message', (newMessageReceived) => {
       var chat = newMessageReceived.chat;
 
       if (!chat.users) return console.log('Chat.users not defined');
 
       chat.users.forEach((user) => {
-        if (user._id === newMessageReceived.sender._id) return; // Don't send to self
-        
-        // Send to the specific user's personal room
-        // This ensures they get the message notification even if they aren't in the chat room
+        if (user._id === newMessageReceived.sender._id) return; 
         socket.in(user._id).emit('message received', newMessageReceived);
       });
     });

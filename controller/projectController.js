@@ -4,9 +4,10 @@ import { Document } from '../model/Document.js';
 import { Task } from '../model/Task.js';
 import { Finance } from '../model/Finance.js';
 import { Notification } from '../model/Notification.js';
+import { Chat } from '../model/Chat.js'; // Import Chat model
 import { uploadToCloudinary } from '../utils/cloudinary.js';
-import { Chat } from '../model/Chat.js';
 
+// @desc    Create a new project
 export const createProject = async (req, res) => {
   try {
     const {
@@ -18,7 +19,7 @@ export const createProject = async (req, res) => {
       startDate,
       endDate,
       status,
-      teamMembers 
+      teamMembers // Array of user IDs or Objects
     } = req.body;
 
     const clientUser = await User.findById(clientId);
@@ -26,6 +27,7 @@ export const createProject = async (req, res) => {
       return res.status(400).json({ message: 'Invalid Client ID provided' });
     }
 
+    // Process Team Members
     let formattedTeam = [];
     if (teamMembers) {
       const parsedMembers = typeof teamMembers === 'string' ? JSON.parse(teamMembers) : teamMembers;
@@ -65,27 +67,31 @@ export const createProject = async (req, res) => {
       milestones: defaultMilestones
     });
 
-    const chatUsers = [req.user._id, clientId];
-   
-    if (formattedTeam.length > 0) {
-        formattedTeam.forEach(member => {
-            if (!chatUsers.includes(member.user)) {
-                chatUsers.push(member.user);
-            }
-        });
-    }
-
-    await Chat.create({
-        chatName: `Project: ${name}`,
-        isGroupChat: true,
-        users: chatUsers,
-        groupAdmin: req.user._id,
-        project: project._id
+    // --- AUTO-CREATE PROJECT CHAT GROUP ---
+    // 1. Collect all initial members: Admin (Creator), Client, and Team Members
+    const chatMembers = [req.user._id, clientId];
+    
+    // Add unique team member IDs
+    formattedTeam.forEach(member => {
+        // Ensure we don't add duplicates if admin/client is also in the team list
+        if (!chatMembers.some(id => id.toString() === member.user.toString())) {
+            chatMembers.push(member.user);
+        }
     });
 
+    // 2. Create the Group Chat linked to this Project
+    await Chat.create({
+        chatName: `${name} (Project Group)`, // e.g., "Luxury Villa (Project Group)"
+        isGroupChat: true,
+        users: chatMembers,
+        groupAdmin: req.user._id,
+        project: project._id 
+    });
+    // --------------------------------------
+
+    // Handle Initial Documents
     if (req.files && req.files['documents']) {
       const initialMilestone = project.milestones[0];
-      
       const uploadPromises = req.files['documents'].map(async (file) => {
         const result = await uploadToCloudinary(file.buffer, 'architectural-projects/documents');
         return Document.create({
@@ -100,13 +106,14 @@ export const createProject = async (req, res) => {
             size: file.size,
             format: result.format
           },
-          type: 'Other', 
+          type: 'Other',
           status: 'Approved'
         });
       });
       await Promise.all(uploadPromises);
     }
 
+    // NOTIFICATION TRIGGER
     if (formattedTeam.length > 0) {
         const notificationPromises = formattedTeam.map(member => 
             Notification.create({
@@ -128,6 +135,7 @@ export const createProject = async (req, res) => {
   }
 };
 
+// @desc    Get all projects
 export const getProjects = async (req, res) => {
     try {
       let query = {};
@@ -136,7 +144,6 @@ export const getProjects = async (req, res) => {
       } else if (req.user.role === 'team_member') {
         query = { 'teamMembers.user': req.user._id };
       }
-      // Admin filter
       if (req.user.role === 'admin' && req.query.clientId) {
         query.client = req.query.clientId;
       }
@@ -153,6 +160,7 @@ export const getProjects = async (req, res) => {
     }
 };
 
+// @desc    Get Full Project Details
 export const getProjectById = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id)
@@ -160,7 +168,7 @@ export const getProjectById = async (req, res) => {
         .populate('teamMembers.user', 'name email role avatar employeeId phoneNumber');
       
       if (!project) return res.status(404).json({ message: 'Project not found' });
-
+      
       if (req.user.role === 'client' && project.client._id.toString() !== req.user._id.toString()) {
           return res.status(403).json({ message: 'Not authorized' });
       }
@@ -214,6 +222,7 @@ export const getProjectById = async (req, res) => {
     }
 };
 
+// @desc    Update project details
 export const updateProject = async (req, res) => {
     try {
       const project = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -223,6 +232,7 @@ export const updateProject = async (req, res) => {
     }
 };
 
+// @desc    Add a Milestone Manually
 export const addMilestone = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id);
@@ -241,6 +251,7 @@ export const addMilestone = async (req, res) => {
     }
 };
 
+// @desc    Delete a project
 export const deleteProject = async (req, res) => {
     try {
       await Project.findByIdAndDelete(req.params.id);
@@ -250,6 +261,7 @@ export const deleteProject = async (req, res) => {
     }
 };
 
+// @desc    Add a Team Member to an existing Project
 export const addTeamMemberToProject = async (req, res) => {
   try {
     const { userId, role } = req.body;
@@ -270,15 +282,20 @@ export const addTeamMemberToProject = async (req, res) => {
 
     project.teamMembers.push({ user: userId, role: role || 'Contributor' });
     await project.save();
- 
-    const chat = await Chat.findOne({ project: project._id, isGroupChat: true });
-    if (chat) {
-        if (!chat.users.includes(userId)) {
-            chat.users.push(userId);
-            await chat.save();
+    
+    // --- AUTO-UPDATE PROJECT CHAT ---
+    // If there is an existing project chat, add the new member to it
+    const projectChat = await Chat.findOne({ project: project._id, isGroupChat: true });
+    if (projectChat) {
+        // Only push if not already in the users list
+        if (!projectChat.users.includes(userId)) {
+            projectChat.users.push(userId);
+            await projectChat.save();
         }
     }
+    // -------------------------------
 
+    // NOTIFICATION TRIGGER
     await Notification.create({
         recipient: userId,
         sender: req.user._id,
@@ -297,6 +314,7 @@ export const addTeamMemberToProject = async (req, res) => {
   }
 };
 
+// @desc    Upload Final Milestone Document
 export const uploadMilestoneDocument = async (req, res) => {
   try {
     const { id, milestoneId } = req.params;
@@ -324,11 +342,10 @@ export const uploadMilestoneDocument = async (req, res) => {
         format: result.format
       },
       type: 'Deliverable', 
-      status: 'Review' 
+      status: 'Review'
     });
 
     milestone.status = 'Completed';
-
     const total = project.milestones.length;
     const completed = project.milestones.filter(m => m.status === 'Completed').length;
     project.overallProgress = Math.round((completed / total) * 100);
