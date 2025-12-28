@@ -5,8 +5,8 @@ import { Task } from '../model/Task.js';
 import { Finance } from '../model/Finance.js';
 import { Notification } from '../model/Notification.js';
 import { uploadToCloudinary } from '../utils/cloudinary.js';
+import { Chat } from '../model/Chat.js';
 
-// @desc    Create a new project
 export const createProject = async (req, res) => {
   try {
     const {
@@ -18,7 +18,7 @@ export const createProject = async (req, res) => {
       startDate,
       endDate,
       status,
-      teamMembers // Array of user IDs or Objects
+      teamMembers 
     } = req.body;
 
     const clientUser = await User.findById(clientId);
@@ -26,8 +26,6 @@ export const createProject = async (req, res) => {
       return res.status(400).json({ message: 'Invalid Client ID provided' });
     }
 
-    // Process Team Members
-    // Ideally receives: [{ user: 'ID', role: 'Architect' }] or just ['ID', 'ID']
     let formattedTeam = [];
     if (teamMembers) {
       const parsedMembers = typeof teamMembers === 'string' ? JSON.parse(teamMembers) : teamMembers;
@@ -46,7 +44,6 @@ export const createProject = async (req, res) => {
       coverImageData = { public_id: result.public_id, url: result.secure_url };
     }
 
-    // Default Milestones (Standard Architectural Phases)
     const defaultMilestones = [
       { name: 'Pre-Design', status: 'Pending', isEnabled: true },
       { name: 'Schematic Design', status: 'Pending', isEnabled: true },
@@ -68,9 +65,25 @@ export const createProject = async (req, res) => {
       milestones: defaultMilestones
     });
 
-    // Handle Initial Documents (if any)
+    const chatUsers = [req.user._id, clientId];
+   
+    if (formattedTeam.length > 0) {
+        formattedTeam.forEach(member => {
+            if (!chatUsers.includes(member.user)) {
+                chatUsers.push(member.user);
+            }
+        });
+    }
+
+    await Chat.create({
+        chatName: `Project: ${name}`,
+        isGroupChat: true,
+        users: chatUsers,
+        groupAdmin: req.user._id,
+        project: project._id
+    });
+
     if (req.files && req.files['documents']) {
-      // Assign to first milestone by default
       const initialMilestone = project.milestones[0];
       
       const uploadPromises = req.files['documents'].map(async (file) => {
@@ -87,14 +100,13 @@ export const createProject = async (req, res) => {
             size: file.size,
             format: result.format
           },
-          type: 'Other', // Initial docs are generic
-          status: 'Approved' // Auto-approve admin uploads
+          type: 'Other', 
+          status: 'Approved'
         });
       });
       await Promise.all(uploadPromises);
     }
 
-    // NOTIFICATION TRIGGER: Notify Team Members
     if (formattedTeam.length > 0) {
         const notificationPromises = formattedTeam.map(member => 
             Notification.create({
@@ -116,7 +128,6 @@ export const createProject = async (req, res) => {
   }
 };
 
-// @desc    Get all projects
 export const getProjects = async (req, res) => {
     try {
       let query = {};
@@ -142,16 +153,14 @@ export const getProjects = async (req, res) => {
     }
 };
 
-// @desc    Get Full Project Details (Matches UI Tabs: Overview, Team, Milestones, Documents)
 export const getProjectById = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id)
         .populate('client', 'name email phoneNumber address avatar')
-        .populate('teamMembers.user', 'name email role avatar employeeId phoneNumber'); // Added phoneNumber for Team tab
+        .populate('teamMembers.user', 'name email role avatar employeeId phoneNumber');
       
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      
-      // Authorization Check
+
       if (req.user.role === 'client' && project.client._id.toString() !== req.user._id.toString()) {
           return res.status(403).json({ message: 'Not authorized' });
       }
@@ -160,16 +169,12 @@ export const getProjectById = async (req, res) => {
           if (!isMember) return res.status(403).json({ message: 'Not authorized' });
       }
 
-      // Fetch Tasks
       const tasks = await Task.find({ project: project._id })
         .populate('assignedTo', 'name avatar')
         .sort({ endDate: 1 });
 
-      // Fetch ALL Documents (Admin/Team see everything)
-      // Clients see specific docs only (Handled in Client Portal, but here we can filter too)
       let docQuery = { project: project._id };
       if (req.user.role === 'client') {
-          // Clients only see "Deliverables" (Final Milestone Docs)
            docQuery.type = 'Deliverable';
       }
 
@@ -177,7 +182,6 @@ export const getProjectById = async (req, res) => {
         .populate('uploadedBy', 'name role')
         .sort({ createdAt: -1 });
 
-      // Fetch Finance Stats (for Admin/Client)
       let financeStats = { totalPaid: 0, totalUnpaid: 0 };
       if (req.user.role !== 'team_member') {
           const financeAgg = await Finance.aggregate([
@@ -210,7 +214,6 @@ export const getProjectById = async (req, res) => {
     }
 };
 
-// @desc    Update project details
 export const updateProject = async (req, res) => {
     try {
       const project = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -220,7 +223,6 @@ export const updateProject = async (req, res) => {
     }
 };
 
-// @desc    Add a Milestone Manually
 export const addMilestone = async (req, res) => {
     try {
       const project = await Project.findById(req.params.id);
@@ -239,7 +241,6 @@ export const addMilestone = async (req, res) => {
     }
 };
 
-// @desc    Delete a project
 export const deleteProject = async (req, res) => {
     try {
       await Project.findByIdAndDelete(req.params.id);
@@ -249,7 +250,6 @@ export const deleteProject = async (req, res) => {
     }
 };
 
-// @desc    Add a Team Member to an existing Project
 export const addTeamMemberToProject = async (req, res) => {
   try {
     const { userId, role } = req.body;
@@ -270,8 +270,15 @@ export const addTeamMemberToProject = async (req, res) => {
 
     project.teamMembers.push({ user: userId, role: role || 'Contributor' });
     await project.save();
-    
-    // NOTIFICATION TRIGGER
+ 
+    const chat = await Chat.findOne({ project: project._id, isGroupChat: true });
+    if (chat) {
+        if (!chat.users.includes(userId)) {
+            chat.users.push(userId);
+            await chat.save();
+        }
+    }
+
     await Notification.create({
         recipient: userId,
         sender: req.user._id,
@@ -281,7 +288,6 @@ export const addTeamMemberToProject = async (req, res) => {
         onModel: 'Project'
     });
 
-    // Populate and return updated team
     await project.populate('teamMembers.user', 'name role avatar employeeId');
 
     res.json(project.teamMembers);
@@ -291,7 +297,6 @@ export const addTeamMemberToProject = async (req, res) => {
   }
 };
 
-// @desc    Upload Final Milestone Document (Admin Only) -> THIS IS WHAT CLIENT SEES
 export const uploadMilestoneDocument = async (req, res) => {
   try {
     const { id, milestoneId } = req.params;
@@ -306,7 +311,6 @@ export const uploadMilestoneDocument = async (req, res) => {
     
     const result = await uploadToCloudinary(req.file.buffer, 'architectural-projects/milestones');
 
-    // Create "Deliverable" Document
     const document = await Document.create({
       name: req.body.name || req.file.originalname,
       project: project._id,
@@ -320,21 +324,17 @@ export const uploadMilestoneDocument = async (req, res) => {
         format: result.format
       },
       type: 'Deliverable', 
-      status: 'Review' // Client needs to Review/Approve it
+      status: 'Review' 
     });
 
-    // Update Milestone Status (Pending -> Completed or In Progress -> Completed)
-    // Note: Admin uploads this when they are ready to complete the milestone
     milestone.status = 'Completed';
-    
-    // Recalculate Overall Progress
+
     const total = project.milestones.length;
     const completed = project.milestones.filter(m => m.status === 'Completed').length;
     project.overallProgress = Math.round((completed / total) * 100);
 
     await project.save();
 
-    // NOTIFICATION TRIGGER: Notify the Client
     await Notification.create({
         recipient: project.client,
         sender: req.user._id,
