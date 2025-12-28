@@ -370,14 +370,16 @@ export const verifyOtp = async (req, res) => {
 };
 
 export const resetPassword = async (req, res) => {
-    const { userId, newPassword, confirmPassword } = req.body;
+    const { email, newPassword, confirmPassword } = req.body;
 
     try {
         if (newPassword !== confirmPassword) {
              return res.status(400).json({ message: "Passwords do not match" });
         }
 
-        const user = await User.findById(userId);
+
+        const user = await User.findOne({ email: email });
+
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
