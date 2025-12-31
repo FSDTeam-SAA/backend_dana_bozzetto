@@ -1,26 +1,29 @@
 import { Chat } from '../model/Chat.js';
 import User from '../model/User.js';
+import { Project } from '../model/Project.js';
 
-// @desc    Access a Chat (Create or Fetch 1-on-1)
+// @desc    Access a Chat (1-on-1 per Project)
 // @route   POST /api/chats
 // @access  Private
 export const accessChat = async (req, res) => {
-  const { userId } = req.body; // The ID of the person you want to chat with
+  // We need the other user's ID AND the project ID to define this unique room
+  const { userId, projectId } = req.body;
 
-  if (!userId) {
-    return res.status(400).json({ message: 'UserId param not sent with request' });
+  if (!userId || !projectId) {
+    return res.status(400).json({ message: 'UserId and ProjectId params not sent with request' });
   }
 
-  // 1. Check if chat exists
+  // 1. Check if a chat exists between these TWO users for THIS project
   var isChat = await Chat.find({
-    isGroupChat: false,
     $and: [
-      { users: { $elemMatch: { $eq: req.user._id } } },
-      { users: { $elemMatch: { $eq: userId } } },
+      { users: { $elemMatch: { $eq: req.user._id } } }, // You
+      { users: { $elemMatch: { $eq: userId } } },       // Them
+      { project: projectId }                            // Specific Project Context
     ],
   })
     .populate('users', '-password')
-    .populate('latestMessage');
+    .populate('latestMessage')
+    .populate('project', 'name projectNo status'); // Populate project info
 
   isChat = await User.populate(isChat, {
     path: 'latestMessage.sender',
@@ -32,17 +35,18 @@ export const accessChat = async (req, res) => {
   } else {
     // 2. Create new chat if none exists
     var chatData = {
-      chatName: 'sender',
-      isGroupChat: false,
+      chatName: 'sender', // Placeholder, frontend usually names it by the other user
       users: [req.user._id, userId],
+      project: projectId
     };
 
     try {
       const createdChat = await Chat.create(chatData);
-      const FullChat = await Chat.findOne({ _id: createdChat._id }).populate(
-        'users',
-        '-password'
-      );
+      
+      const FullChat = await Chat.findOne({ _id: createdChat._id })
+        .populate('users', '-password')
+        .populate('project', 'name projectNo status');
+
       res.status(200).send(FullChat);
     } catch (error) {
       res.status(400).json({ message: error.message });
@@ -55,11 +59,22 @@ export const accessChat = async (req, res) => {
 // @access  Private
 export const fetchChats = async (req, res) => {
   try {
-    Chat.find({ users: { $elemMatch: { $eq: req.user._id } } })
+    // Optional: Filter by project if passed in query (e.g., ?projectId=...)
+    const { projectId } = req.query;
+    
+    let query = { 
+        users: { $elemMatch: { $eq: req.user._id } } 
+    };
+
+    if (projectId) {
+        query.project = projectId;
+    }
+
+    Chat.find(query)
       .populate('users', '-password')
-      .populate('groupAdmin', '-password')
+      .populate('project', 'name projectNo status')
       .populate('latestMessage')
-      .sort({ updatedAt: -1 })
+      .sort({ updatedAt: -1 }) // Sort by most recent activity
       .then(async (results) => {
         results = await User.populate(results, {
           path: 'latestMessage.sender',
@@ -67,50 +82,6 @@ export const fetchChats = async (req, res) => {
         });
         res.status(200).send(results);
       });
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-};
-
-// @desc    Create Group Chat (Manual or for Project)
-// @route   POST /api/chats/group
-// @access  Private
-export const createGroupChat = async (req, res) => {
-  if (!req.body.users || !req.body.name) {
-    return res.status(400).send({ message: 'Please fill all the fields' });
-  }
-
-  // Fix: Handle both JSON Array and Stringified Array (FormData)
-  let users = req.body.users;
-  if (typeof users === 'string') {
-      try {
-        users = JSON.parse(users);
-      } catch (error) {
-        return res.status(400).send({ message: 'Invalid users array format' });
-      }
-  }
-
-  if (users.length < 2) {
-    return res.status(400).send({ message: 'More than 2 users are required to form a group chat' });
-  }
-
-  // Add currently logged in user (Admin/Creator)
-  users.push(req.user);
-
-  try {
-    const groupChat = await Chat.create({
-      chatName: req.body.name,
-      users: users,
-      isGroupChat: true,
-      groupAdmin: req.user,
-      project: req.body.projectId || null // Optional: Link to project
-    });
-
-    const fullGroupChat = await Chat.findOne({ _id: groupChat._id })
-      .populate('users', '-password')
-      .populate('groupAdmin', '-password');
-
-    res.status(200).json(fullGroupChat);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }

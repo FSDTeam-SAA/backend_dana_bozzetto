@@ -2,10 +2,11 @@ import { Project } from '../model/Project.js';
 import { Task } from '../model/Task.js';
 import { Document } from '../model/Document.js';
 import { Notification } from '../model/Notification.js';
+import { Chat } from '../model/Chat.js'; 
+import { Message } from '../model/Message.js'; 
 
 // @desc    Get Team Member Homepage Data (Dashboard)
 // @route   GET /api/team-portal/dashboard
-// @access  Private (Team Member)
 export const getMemberDashboard = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -14,17 +15,14 @@ export const getMemberDashboard = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // 1. Today's Tasks
-    // Fetch tasks due today OR in progress (Priority items)
     const todayTasks = await Task.find({
       assignedTo: userId,
       $or: [
-        { endDate: { $gte: today, $lt: tomorrow } }, // Due today
+        { endDate: { $gte: today, $lt: tomorrow } }, 
         { status: 'In Progress' }
       ]
     }).populate('project', 'name').limit(5);
 
-    // 2. Project Overview Stats (Active vs Pending Tasks)
     const totalActiveTasks = await Task.countDocuments({
       assignedTo: userId,
       status: 'In Progress'
@@ -35,8 +33,6 @@ export const getMemberDashboard = async (req, res) => {
       status: 'Pending'
     });
 
-    // 3. Assigned Projects (Card View)
-    // We need: Image, Name, Owner Name, Deadline, Milestone Progress
     const projects = await Project.find({ 'teamMembers.user': userId })
       .populate('client', 'name')
       .populate('teamMembers.user', 'avatar')
@@ -46,7 +42,6 @@ export const getMemberDashboard = async (req, res) => {
       const totalMilestones = project.milestones.length;
       const completedMilestones = project.milestones.filter(m => m.status === 'Completed').length;
       
-      // Calculate current milestone index (1-based)
       let currentMilestoneIndex = completedMilestones + 1;
       if (currentMilestoneIndex > totalMilestones) currentMilestoneIndex = totalMilestones;
 
@@ -57,11 +52,44 @@ export const getMemberDashboard = async (req, res) => {
         status: project.status,
         deadline: project.endDate,
         coverImage: project.coverImage?.url || '',
-        milestoneProgress: `${currentMilestoneIndex}/${totalMilestones}`, // e.g. "2/4"
+        milestoneProgress: `${currentMilestoneIndex}/${totalMilestones}`, 
         overallProgress: project.overallProgress,
-        teamAvatars: project.teamMembers.map(tm => tm.user?.avatar?.url).filter(Boolean).slice(0, 3) // Show top 3 avatars
+        teamAvatars: project.teamMembers.map(tm => tm.user?.avatar?.url).filter(Boolean).slice(0, 3) 
       };
     });
+
+    const userChats = await Chat.find({ users: { $elemMatch: { $eq: userId } } })
+      .select('_id')
+      .lean();
+    
+    const chatIds = userChats.map(c => c._id);
+
+    const recentMessages = await Message.find({ 
+       chat: { $in: chatIds },
+       sender: { $ne: userId } 
+    })
+    .sort({ createdAt: -1 })
+    .limit(3)
+    .populate('sender', 'name avatar');
+
+    const formattedMessages = recentMessages.map(msg => ({
+        type: 'message',
+        text: `Message from ${msg.sender ? msg.sender.name : 'User'}`,
+        subText: msg.content ? (msg.content.substring(0, 30) + (msg.content.length > 30 ? '...' : '')) : 'Sent an attachment',
+        time: msg.createdAt,
+        id: msg.chat,
+        senderAvatar: msg.sender?.avatar?.url
+    }));
+
+    // Quick Actions Counts
+    const projectIds = projects.map(p => p._id);
+    const documentsCount = await Document.countDocuments({ project: { $in: projectIds } });
+
+    const pendingTaskApprovals = await Task.countDocuments({ assignedTo: userId, status: 'Waiting for Approval' });
+    const pendingDocApprovals = await Document.countDocuments({ uploadedBy: userId, status: 'Review' });
+    
+    const rejectedTasks = await Task.countDocuments({ assignedTo: userId, status: 'In Progress', adminFeedback: { $exists: true, $ne: "" } });
+    const rejectedDocs = await Document.countDocuments({ uploadedBy: userId, status: 'Revision Requested' });
 
     res.json({
       userName: req.user.name,
@@ -70,7 +98,13 @@ export const getMemberDashboard = async (req, res) => {
         activeTasks: totalActiveTasks,
         pendingTasks: totalPendingTasks
       },
-      assignedProjects
+      quickActions: {
+        documents: documentsCount,
+        approvals: pendingTaskApprovals + pendingDocApprovals,
+        reviews: rejectedTasks + rejectedDocs
+      },
+      assignedProjects,
+      recentMessages: formattedMessages
     });
 
   } catch (error) {
@@ -80,8 +114,6 @@ export const getMemberDashboard = async (req, res) => {
 };
 
 // @desc    Get Tasks for Calendar View
-// @route   GET /api/team-portal/calendar
-// @access  Private (Team Member)
 export const getMemberCalendar = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -92,7 +124,6 @@ export const getMemberCalendar = async (req, res) => {
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0, 23, 59, 59);
       
-      // Filter tasks that fall within this month (Start OR End date)
       dateFilter = {
         $or: [
             { startDate: { $gte: startDate, $lte: endDate } },
@@ -113,8 +144,6 @@ export const getMemberCalendar = async (req, res) => {
 };
 
 // @desc    Global Search (Projects & Documents)
-// @route   GET /api/team-portal/search?q=...
-// @access  Private (Team Member)
 export const searchGlobal = async (req, res) => {
   try {
     const { q } = req.query;
@@ -124,14 +153,11 @@ export const searchGlobal = async (req, res) => {
 
     const regex = new RegExp(q, 'i');
 
-    // Search Projects user is part of
     const projects = await Project.find({
       'teamMembers.user': userId,
       name: regex
     }).select('name status coverImage');
 
-    // Search Documents in those projects
-    // First get project IDs user belongs to
     const userProjects = await Project.find({ 'teamMembers.user': userId }).select('_id');
     const projectIds = userProjects.map(p => p._id);
     
@@ -154,12 +180,10 @@ export const searchGlobal = async (req, res) => {
   }
 };
 
-// @desc    Update Task Status (Quick Action: Done / Dispute)
-// @route   PUT /api/team-portal/tasks/:id/status
-// @access  Private (Team Member)
+// @desc    Update Task Status
 export const updateMemberTaskStatus = async (req, res) => {
   try {
-    const { status } = req.body; // 'Done', 'Dispute', 'In Progress'
+    const { status } = req.body; 
     const taskId = req.params.id;
     const userId = req.user._id;
 
@@ -169,16 +193,10 @@ export const updateMemberTaskStatus = async (req, res) => {
       return res.status(404).json({ message: 'Task not found or not assigned to you' });
     }
 
-    // Logic for Dispute
     if (status === 'Dispute') {
        task.status = 'On Hold'; 
-       
-       // Trigger Notification to Admins
-       // (Admin needs to know a task is disputed/stuck)
-       // We can iterate admin users and notify
     } else if (status === 'Done') {
         task.status = 'Completed'; 
-        // Note: Usually "Submit" is preferred for review, but "Done" might be for simple tasks
     } else {
        task.status = status;
     }
@@ -188,4 +206,97 @@ export const updateMemberTaskStatus = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
+};
+
+// --- NEW QUICK ACTION ENDPOINTS ---
+
+// @desc    Get All Documents (Supports ?milestone=...)
+// @route   GET /api/team-portal/documents
+export const getAllTeamDocuments = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { milestone } = req.query; 
+
+        // 1. Find projects user is assigned to
+        const userProjects = await Project.find({ 'teamMembers.user': userId }).select('_id milestones');
+        const projectIds = userProjects.map(p => p._id);
+
+        // 2. Build Query
+        let query = { project: { $in: projectIds } };
+
+        // 3. Apply Milestone Filter
+        if (milestone && milestone !== 'All') {
+            let targetMilestoneIds = [];
+            userProjects.forEach(p => {
+                const found = p.milestones.find(m => m.name === milestone);
+                if (found) targetMilestoneIds.push(found._id);
+            });
+            query.milestoneId = { $in: targetMilestoneIds };
+        }
+
+        const documents = await Document.find(query)
+            .populate('project', 'name')
+            .populate('uploadedBy', 'name')
+            .sort({ createdAt: -1 });
+
+        res.json(documents);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// @desc    Get Items Waiting for Approval (Tasks & Docs)
+// @route   GET /api/team-portal/approvals?status=...
+export const getPendingApprovals = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { status } = req.query; 
+
+        let taskQuery = { assignedTo: userId };
+        if (status && status !== 'All') {
+            if (status === 'Pending') taskQuery.status = 'Waiting for Approval';
+            else taskQuery.status = status;
+        } else {
+             taskQuery.status = 'Waiting for Approval';
+        }
+
+        let docQuery = { uploadedBy: userId };
+        if (status && status !== 'All') {
+             if (status === 'Pending') docQuery.status = 'Review';
+             else docQuery.status = status;
+        } else {
+             docQuery.status = 'Review';
+        }
+
+        const tasks = await Task.find(taskQuery).populate('project', 'name');
+        const documents = await Document.find(docQuery).populate('project', 'name');
+
+        res.json({ tasks, documents });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// @desc    Get Items Needing Revision
+// @route   GET /api/team-portal/reviews
+export const getItemsForReview = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        const tasks = await Task.find({ 
+            assignedTo: userId, 
+            status: 'In Progress', 
+            adminFeedback: { $exists: true, $ne: "" } 
+        }).populate('project', 'name');
+
+        const documents = await Document.find({ 
+            uploadedBy: userId, 
+            status: 'Revision Requested' 
+        }).populate('project', 'name');
+
+        res.json({ tasks, documents });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
 };

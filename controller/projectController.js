@@ -4,8 +4,8 @@ import { Document } from '../model/Document.js';
 import { Task } from '../model/Task.js';
 import { Finance } from '../model/Finance.js';
 import { Notification } from '../model/Notification.js';
-import { Chat } from '../model/Chat.js'; // Import Chat model
 import { uploadToCloudinary } from '../utils/cloudinary.js';
+// Chat model import removed as we no longer create group chats here
 
 // @desc    Create a new project
 export const createProject = async (req, res) => {
@@ -67,27 +67,8 @@ export const createProject = async (req, res) => {
       milestones: defaultMilestones
     });
 
-    // --- AUTO-CREATE PROJECT CHAT GROUP ---
-    // 1. Collect all initial members: Admin (Creator), Client, and Team Members
-    const chatMembers = [req.user._id, clientId];
-    
-    // Add unique team member IDs
-    formattedTeam.forEach(member => {
-        // Ensure we don't add duplicates if admin/client is also in the team list
-        if (!chatMembers.some(id => id.toString() === member.user.toString())) {
-            chatMembers.push(member.user);
-        }
-    });
-
-    // 2. Create the Group Chat linked to this Project
-    await Chat.create({
-        chatName: `${name} (Project Group)`, // e.g., "Luxury Villa (Project Group)"
-        isGroupChat: true,
-        users: chatMembers,
-        groupAdmin: req.user._id,
-        project: project._id 
-    });
-    // --------------------------------------
+    // Auto-Create Group Chat logic REMOVED.
+    // System now relies on direct 1-on-1 chats.
 
     // Handle Initial Documents
     if (req.files && req.files['documents']) {
@@ -283,17 +264,7 @@ export const addTeamMemberToProject = async (req, res) => {
     project.teamMembers.push({ user: userId, role: role || 'Contributor' });
     await project.save();
     
-    // --- AUTO-UPDATE PROJECT CHAT ---
-    // If there is an existing project chat, add the new member to it
-    const projectChat = await Chat.findOne({ project: project._id, isGroupChat: true });
-    if (projectChat) {
-        // Only push if not already in the users list
-        if (!projectChat.users.includes(userId)) {
-            projectChat.users.push(userId);
-            await projectChat.save();
-        }
-    }
-    // -------------------------------
+    // Auto-Update Project Chat logic REMOVED.
 
     // NOTIFICATION TRIGGER
     await Notification.create({

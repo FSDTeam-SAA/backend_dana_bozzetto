@@ -2,6 +2,7 @@ import { Project } from '../model/Project.js';
 import { Document } from '../model/Document.js';
 import { Finance } from '../model/Finance.js';
 import { Message } from '../model/Message.js';
+import { Chat } from '../model/Chat.js'; 
 import { Notification } from '../model/Notification.js';
 import User from '../model/User.js';
 
@@ -12,10 +13,6 @@ export const getClientDashboard = async (req, res) => {
 
     const activeProjectsCount = await Project.countDocuments({ client: userId, status: 'Active' });
     const pendingProjectsCount = await Project.countDocuments({ client: userId, status: 'Pending' });
-    const totalDocumentsCount = await Document.countDocuments({ 
-      project: { $in: await Project.find({ client: userId }).distinct('_id') },
-      type: 'Deliverable' 
-    });
 
     const projectsRaw = await Project.find({ client: userId })
       .populate('teamMembers.user', 'name avatar')
@@ -42,7 +39,7 @@ export const getClientDashboard = async (req, res) => {
 
     const projectIds = projectsRaw.map(p => p._id);
 
-    // Filter Recent Activity: Only show DELIVERABLES 
+    // Recent Activity Logic
     const newDocs = await Document.find({ 
       project: { $in: projectIds },
       type: 'Deliverable', 
@@ -60,12 +57,19 @@ export const getClientDashboard = async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(3);
 
-    // Recent Messages placeholder
+    const userChats = await Chat.find({ users: { $elemMatch: { $eq: userId } } })
+      .select('_id')
+      .lean();
+    
+    const chatIds = userChats.map(c => c._id);
+
     const recentMessages = await Message.find({ 
-       // chat: { $in: [] } 
+       chat: { $in: chatIds },
+       sender: { $ne: userId } 
     })
     .sort({ createdAt: -1 })
-    .limit(3);
+    .limit(3)
+    .populate('sender', 'name');
 
     let activityFeed = [];
 
@@ -91,14 +95,24 @@ export const getClientDashboard = async (req, res) => {
       });
     });
 
+    recentMessages.forEach(msg => {
+      activityFeed.push({
+        type: 'message',
+        text: `Message from ${msg.sender ? msg.sender.name : 'Team'}`,
+        subText: msg.content ? (msg.content.substring(0, 30) + (msg.content.length > 30 ? '...' : '')) : 'Sent an attachment',
+        time: msg.createdAt,
+        id: msg.chat, 
+        link: `/messages`
+      });
+    });
+
     activityFeed.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     res.json({
       userName: req.user.name,
       stats: {
         active: activeProjectsCount,
-        pending: pendingProjectsCount,
-        documents: totalDocumentsCount
+        pending: pendingProjectsCount
       },
       projects,
       recentActivity: activityFeed.slice(0, 5)
@@ -110,54 +124,58 @@ export const getClientDashboard = async (req, res) => {
   }
 };
 
+// @desc    Get All Client Documents (Filtered by Milestone)
+// @route   GET /api/client-portal/documents?milestone=Pre-Design
 export const getClientDocuments = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { milestone } = req.query;
+    const { milestone } = req.query; 
     
+    // 1. Get all projects owned by this client
     const projects = await Project.find({ client: userId });
     const projectIds = projects.map(p => p._id);
 
+    // 2. Query: Only 'Deliverable' type documents in those projects
     let query = { 
       project: { $in: projectIds },
       type: 'Deliverable' 
     };
+
+    // 3. Milestone Filtering
+    if (milestone && milestone !== 'All') {
+        // Find matching milestone IDs from the user's projects
+        let targetMilestoneIds = [];
+        projects.forEach(p => {
+            const found = p.milestones.find(m => m.name === milestone);
+            if (found) targetMilestoneIds.push(found._id);
+        });
+        query.milestoneId = { $in: targetMilestoneIds };
+    }
 
     const documents = await Document.find(query)
       .populate('project', 'name milestones') 
       .populate('uploadedBy', 'name') 
       .sort({ createdAt: -1 });
 
-    // Format & Convert Size
-    let formattedDocs = documents.map(doc => {
+    // Format for Frontend
+    const formattedDocs = documents.map(doc => {
       const milestoneObj = doc.project.milestones.id(doc.milestoneId);
-      
-      // Convert Bytes to MB (e.g., 685046 -> "0.65 MB")
-      const sizeInBytes = doc.file.size || 0;
-      const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2); 
+      const sizeInMB = (doc.file.size / (1024 * 1024)).toFixed(2); 
 
       return {
         _id: doc._id,
         name: doc.name,
         projectName: doc.project.name,
-        projectId: doc.project._id,
-        milestoneId: doc.milestoneId,
         milestoneName: milestoneObj ? milestoneObj.name : 'General', 
         type: doc.type, 
-        size: `${sizeInMB} MB`, // Formatted string
+        size: `${sizeInMB} MB`,
         url: doc.file.url,
         uploadedBy: doc.uploadedBy ? doc.uploadedBy.name : 'System',
         uploadedDate: doc.createdAt,
-        status: doc.status, 
+        status: doc.status,
         commentsCount: doc.comments.length
       };
     });
-
-    // SERVER-SIDE FILTERING Logic
-    // If ?milestone=Pre-Design is passed, filter the array
-    if (milestone && milestone !== 'All') {
-        formattedDocs = formattedDocs.filter(doc => doc.milestoneName === milestone);
-    }
 
     res.json(formattedDocs);
   } catch (error) {
@@ -186,19 +204,29 @@ export const addDocumentComment = async (req, res) => {
       }
 };
 
-// @desc    Get Client Finances
+// @desc    Get Client Finances (List View with Filters)
+// @route   GET /api/client-portal/finance?status=Paid
 export const getClientFinance = async (req, res) => {
     try {
         const userId = req.user._id;
-        const projects = await Project.find({ client: userId });
-        const totalBudget = projects.reduce((acc, proj) => acc + (proj.budget || 0), 0);
-    
-        const invoices = await Finance.find({ client: userId, type: 'Invoice' })
+        const { status } = req.query; // Filter: All, Paid, Unpaid...
+
+        // Base Query: Own Projects + Type Invoice
+        let query = { client: userId, type: 'Invoice' };
+
+        // Apply Filter
+        if (status && status !== 'All') {
+            query.status = status;
+        }
+
+        const invoices = await Finance.find(query)
           .populate('project', 'name')
           .sort({ issueDate: -1 });
     
-        const totalPaid = invoices.filter(inv => inv.status === 'Paid').reduce((acc, inv) => acc + (inv.totalAmount || 0), 0);
-        const totalUnpaid = invoices.filter(inv => inv.status !== 'Paid').reduce((acc, inv) => acc + (inv.totalAmount || 0), 0);
+        // Calculate Totals for Widgets (Global totals)
+        const allInvoices = await Finance.find({ client: userId, type: 'Invoice' });
+        const totalPaid = allInvoices.filter(inv => inv.status === 'Paid').reduce((acc, inv) => acc + (inv.totalAmount || 0), 0);
+        const totalUnpaid = allInvoices.filter(inv => inv.status !== 'Paid').reduce((acc, inv) => acc + (inv.totalAmount || 0), 0);
     
         const formattedInvoices = invoices.map(inv => ({
           _id: inv._id,
@@ -212,24 +240,42 @@ export const getClientFinance = async (req, res) => {
           downloadUrl: inv.file?.url || ''
         }));
     
-        res.json({ widgets: { totalBudget, totalPaid, totalUnpaid }, invoices: formattedInvoices });
+        res.json({ 
+            widgets: { totalPaid, totalUnpaid }, 
+            invoices: formattedInvoices 
+        });
       } catch (error) {
         res.status(500).json({ message: 'Server error' });
       }
 };
 
-// @desc    Get Client Approvals
+// @desc    Get Client Approvals (Filtered)
+// @route   GET /api/client-portal/approvals?status=Pending
 export const getClientApprovals = async (req, res) => {
     try {
         const userId = req.user._id;
+        const { status } = req.query; // Filter: All, Pending, Approved...
+
+        // 1. Get Projects
         const projects = await Project.find({ client: userId }).select('_id');
         const projectIds = projects.map(p => p._id);
     
-        const documents = await Document.find({
+        // 2. Base Query
+        let query = {
           project: { $in: projectIds },
-          type: 'Deliverable',
-          status: { $in: ['Review', 'Approved', 'Rejected', 'Revision Requested'] }
-        })
+          type: 'Deliverable'
+        };
+
+        // 3. Apply Status Filter
+        if (status && status !== 'All') {
+            if (status === 'Pending') query.status = 'Review'; // Client sees "Review" as "Pending Action"
+            else query.status = status;
+        } else {
+             // Default View: Show all relevant to approvals
+             query.status = { $in: ['Review', 'Approved', 'Rejected', 'Revision Requested'] };
+        }
+    
+        const documents = await Document.find(query)
         .populate('project', 'name')
         .populate('uploadedBy', 'name role')
         .sort({ updatedAt: -1 }); 
@@ -238,7 +284,7 @@ export const getClientApprovals = async (req, res) => {
           _id: doc._id,
           title: doc.name,
           projectName: doc.project.name,
-          description: doc.notes || 'Final milestone deliverable for review.',
+          description: doc.notes || 'Deliverable for review.',
           requestedBy: doc.uploadedBy ? `${doc.uploadedBy.name} (${doc.uploadedBy.role})` : 'System',
           requestedDate: doc.createdAt,
           dueDate: doc.approvalDueDate || doc.createdAt,

@@ -14,18 +14,28 @@ const router = express.Router();
 router.use(protect);
 router.use(authorize('client'));
 
-// Dashboard
+// @route   GET /api/client-portal/dashboard
+// @desc    Get Client Dashboard Stats & Activity
 router.get('/dashboard', getClientDashboard);
 
-// Documents (Strictly Deliverables)
+// @route   GET /api/client-portal/documents
+// @desc    Get All Deliverables (Supports ?milestone=...)
 router.get('/documents', getClientDocuments);
+
+// @route   POST /api/client-portal/documents/:id/comment
+// @desc    Add feedback to a document
 router.post('/documents/:id/comment', addDocumentComment);
 
-// Finance (Quick Action + Widgets)
+// @route   GET /api/client-portal/finance
+// @desc    Get Financial Records (Supports ?status=...)
 router.get('/finance', getClientFinance);
 
-// Approvals (Deliverables in Review)
-router.get('/approvals', getClientApprovals); 
-router.put('/approvals/:id', updateApprovalStatus); // Approve, Reject, Revision
+// @route   GET /api/client-portal/approvals
+// @desc    Get Pending Approvals (Supports ?status=...)
+router.get('/approvals', getClientApprovals);
+
+// @route   PUT /api/client-portal/approvals/:id
+// @desc    Approve/Reject/Request Revision
+router.put('/approvals/:id', updateApprovalStatus);
 
 export default router;

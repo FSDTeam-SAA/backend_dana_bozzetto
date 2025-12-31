@@ -1,13 +1,19 @@
 import { Message } from '../model/Message.js';
-import User from '../model/User.js';
-import { Chat } from '../model/Chat.js'; 
-import { Notification } from '../model/Notification.js';
+import { uploadToCloudinary } from '../utils/cloudinary.js';
 
+// @desc    Get all messages for a specific chat
+// @route   GET /api/messages/:chatId
+// @access  Private
 export const allMessages = async (req, res) => {
   try {
     const messages = await Message.find({ chat: req.params.chatId })
-      .populate('sender', 'name avatar email')
-      .populate('chat');
+      .populate('sender', 'name avatar email role')
+      .populate('chat')
+      .populate({
+        path: 'replyTo',
+        select: 'content sender attachments',
+        populate: { path: 'sender', select: 'name' }
+      });
       
     res.json(messages);
   } catch (error) {
@@ -15,60 +21,45 @@ export const allMessages = async (req, res) => {
   }
 };
 
-  export const sendMessage = async (req, res) => {
-    const { content, chatId } = req.body;
-
-    if (!content || !chatId) {
-      return res.status(400).json({ message: 'Invalid data passed into request' });
-    }
-
-    var newMessage = {
-      sender: req.user._id,
-      content: content,
-      chat: chatId,
-      readBy: [req.user._id] 
-    };
-
+// @desc    Upload attachment and return URL (Helper for Socket messaging)
+// @route   POST /api/messages/upload
+// @access  Private
+export const uploadMessageAttachments = async (req, res) => {
     try {
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ message: 'No files uploaded' });
+        }
 
-      let message = await Message.create(newMessage);
+        const uploadPromises = req.files.map(async (file) => {
+            const result = await uploadToCloudinary(file.buffer, 'architectural-portal/messages');
+            
+            let fileType = 'image';
+            if (file.mimetype.includes('pdf')) fileType = 'pdf';
+            else if (file.mimetype.match(/(word|document)/)) fileType = 'doc';
+            else if (file.mimetype.match(/(zip|rar|octet-stream)/)) fileType = 'zip';
 
-      message = await message.populate('sender', 'name avatar');
-      message = await message.populate('chat');
-      message = await User.populate(message, {
-        path: 'chat.users',
-        select: 'name email avatar',
-      });
+            return {
+                public_id: result.public_id,
+                url: result.secure_url,
+                fileType: fileType
+            };
+        });
 
-      await Chat.findByIdAndUpdate(req.body.chatId, { latestMessage: message });
+        const attachments = await Promise.all(uploadPromises);
 
-      const io = req.app.get('io'); // Access global io instance
-      io.in(chatId).emit('message received', message);
+        // Return the attachment objects so the Frontend can include them 
+        // in the 'message:send' socket emission.
+        res.status(200).json(attachments);
 
-      const chat = await Chat.findById(chatId);
-      if (chat && chat.users) {
-          const recipients = chat.users.filter(userId => userId.toString() !== req.user._id.toString());
-          
-          const notificationPromises = recipients.map(recipientId => 
-              Notification.create({
-                  recipient: recipientId,
-                  sender: req.user._id,
-                  type: 'Message',
-                  message: `New message from ${req.user.name}: ${content.substring(0, 30)}${content.length > 30 ? '...' : ''}`,
-                  relatedId: chat._id, 
-                  onModel: 'Chat' 
-              })
-          );
-          await Promise.all(notificationPromises);
-      }
-
-      res.json(message);
     } catch (error) {
-      res.status(400).json({ message: error.message });
+        console.error(error);
+        res.status(500).json({ message: 'Upload failed', error: error.message });
     }
-  };
+};
 
-
+// @desc    Mark all messages in a chat as read
+// @route   PUT /api/messages/:chatId/read
+// @access  Private
 export const markAsRead = async (req, res) => {
   try {
     const { chatId } = req.params;

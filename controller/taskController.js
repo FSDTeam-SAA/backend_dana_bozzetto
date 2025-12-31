@@ -51,11 +51,10 @@ export const getTasks = async (req, res) => {
   }
 };
 
-// @desc    Submit Task for Approval (Team Member) - Uploads file
 export const submitTask = async (req, res) => {
   try {
     const taskId = req.params.id;
-    // Matches fields from your "Upload Document" UI Modal
+
     const { docName, docType, notes } = req.body; 
 
     const task = await Task.findById(taskId);
@@ -75,8 +74,8 @@ export const submitTask = async (req, res) => {
     }
 
     task.submission = {
-      docName, // e.g. "Pre-Design"
-      docType, // e.g. "PDF", "DWG"
+      docName,
+      docType, 
       notes,
       file: fileData,
       submittedBy: req.user._id,

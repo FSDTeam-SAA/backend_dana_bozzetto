@@ -10,6 +10,18 @@ const messageSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    attachments: [
+      {
+        public_id: { type: String },
+        url: { type: String },
+        fileType: { type: String }
+      }
+    ],
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Message',
+      default: null
+    },
     chat: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Chat',

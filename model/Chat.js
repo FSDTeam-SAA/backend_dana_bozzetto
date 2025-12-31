@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 const chatSchema = new mongoose.Schema(
   {
     chatName: { type: String, trim: true },
-    isGroupChat: { type: Boolean, default: false },
     users: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -14,11 +13,6 @@ const chatSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Message',
     },
-    groupAdmin: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-    },
-    // Link chat to a specific project
     project: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Project'

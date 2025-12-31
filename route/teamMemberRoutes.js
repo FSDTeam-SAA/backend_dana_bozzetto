@@ -3,7 +3,10 @@ import {
   getMemberDashboard,
   getMemberCalendar,
   searchGlobal,
-  updateMemberTaskStatus
+  updateMemberTaskStatus,
+  getAllTeamDocuments,
+  getPendingApprovals,
+  getItemsForReview
 } from '../controller/teamMemberController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
@@ -28,5 +31,19 @@ router.get('/search', searchGlobal);
 // @route   PUT /api/team-portal/tasks/:id/status
 // @desc    Quick action: Mark task as Done or Dispute
 router.put('/tasks/:id/status', updateMemberTaskStatus);
+
+// --- NEW QUICK ACTION ROUTES ---
+
+// @route   GET /api/team-portal/documents
+// @desc    Get all documents for assigned projects (Supports ?milestone=...)
+router.get('/documents', getAllTeamDocuments);
+
+// @route   GET /api/team-portal/approvals
+// @desc    Get items waiting for approval (Supports ?status=...)
+router.get('/approvals', getPendingApprovals);
+
+// @route   GET /api/team-portal/reviews
+// @desc    Get items sent back for revision
+router.get('/reviews', getItemsForReview);
 
 export default router;
