@@ -186,7 +186,8 @@ export const loginUser = async (req, res) => {
             email: user.email,
             role: user.role,
             avatar: user.avatar,
-            token: accessToken,
+          token: accessToken,
+            refreshToken: refreshToken
         });
     } else {
       res.status(401).json({ message: 'Invalid credentials' });
@@ -199,12 +200,9 @@ export const loginUser = async (req, res) => {
 
 // @desc    Refresh Access Token
 export const refreshToken = async (req, res) => {
-    const cookies = req.cookies;
+    const {refreshToken} = req.body;
 
-    if (!cookies?.jwt) return res.status(401).json({ message: 'Unauthorized, no refresh token' });
-
-    const refreshToken = cookies.jwt;
-
+    if (!refreshToken) return res.status(401).json({ message: 'Unauthorized, no refresh token' });
     try {
         const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
         const user = await User.findById(decoded.userId);
