@@ -264,7 +264,7 @@ export const getAllTeamDocuments = async (req, res) => {
 
 // @desc    Get Approvals (Pending & Approved History)
 // @route   GET /api/team-portal/approvals?status=...
-export const getPendingApprovals = async (req, res) => {
+export const getApprovalsForTeamMembers = async (req, res) => {
     try {
         const userId = req.user._id;
         const { status } = req.query; 
