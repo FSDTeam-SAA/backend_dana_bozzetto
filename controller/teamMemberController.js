@@ -235,42 +235,60 @@ export const getAllTeamDocuments = async (req, res) => {
         }
 
         const documents = await Document.find(query)
-            .populate('project', 'name')
+            .populate('project', 'name milestones')
             .populate('uploadedBy', 'name')
             .sort({ createdAt: -1 });
 
-        res.json(documents);
+        const formattedDocs = documents.map(doc => {
+            const docObj = doc.toObject();
+            const milestoneObj = doc.project?.milestones?.find(
+                m => m._id.toString() === doc.milestoneId.toString()
+            );
+
+            return {
+                ...docObj,
+                milestoneName: milestoneObj ? milestoneObj.name : 'Unknown', 
+                project: {
+                    _id: doc.project._id,
+                    name: doc.project.name
+                }
+            };
+        });
+
+        res.json(formattedDocs);
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server error' });
     }
 };
 
-// @desc    Get Items Waiting for Approval (Tasks & Docs)
+// @desc    Get Approvals (Pending & Approved History)
 // @route   GET /api/team-portal/approvals?status=...
-export const getPendingApprovals = async (req, res) => {
+export const getApprovalsForTeamMembers = async (req, res) => {
     try {
         const userId = req.user._id;
         const { status } = req.query; 
 
         let taskQuery = { assignedTo: userId };
-        if (status && status !== 'All') {
-            if (status === 'Pending') taskQuery.status = 'Waiting for Approval';
-            else taskQuery.status = status;
-        } else {
-             taskQuery.status = 'Waiting for Approval';
-        }
-
         let docQuery = { uploadedBy: userId };
-        if (status && status !== 'All') {
-             if (status === 'Pending') docQuery.status = 'Review';
-             else docQuery.status = status;
+        if (status === 'Approved') {
+            taskQuery.status = 'Completed';
+            docQuery.status = 'Approved';
+        } else if (status === 'Pending') {
+            taskQuery.status = 'Waiting for Approval';
+            docQuery.status = 'Review';
         } else {
-             docQuery.status = 'Review';
+            taskQuery.status = { $in: ['Waiting for Approval', 'Completed'] };
+            docQuery.status = { $in: ['Review', 'Approved'] };
         }
 
-        const tasks = await Task.find(taskQuery).populate('project', 'name');
-        const documents = await Document.find(docQuery).populate('project', 'name');
+        const tasks = await Task.find(taskQuery)
+            .populate('project', 'name')
+            .sort({ updatedAt: -1 });
+
+        const documents = await Document.find(docQuery)
+            .populate('project', 'name')
+            .sort({ updatedAt: -1 });
 
         res.json({ tasks, documents });
     } catch (error) {
@@ -278,8 +296,6 @@ export const getPendingApprovals = async (req, res) => {
     }
 };
 
-// @desc    Get Items Needing Revision
-// @route   GET /api/team-portal/reviews
 export const getItemsForReview = async (req, res) => {
     try {
         const userId = req.user._id;

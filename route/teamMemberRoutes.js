@@ -5,7 +5,7 @@ import {
   searchGlobal,
   updateMemberTaskStatus,
   getAllTeamDocuments,
-  getPendingApprovals,
+  getApprovalsForTeamMembers,
   getItemsForReview
 } from '../controller/teamMemberController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
@@ -40,7 +40,7 @@ router.get('/documents', getAllTeamDocuments);
 
 // @route   GET /api/team-portal/approvals
 // @desc    Get items waiting for approval (Supports ?status=...)
-router.get('/approvals', getPendingApprovals);
+router.get('/approvals', getApprovalsForTeamMembers);
 
 // @route   GET /api/team-portal/reviews
 // @desc    Get items sent back for revision
