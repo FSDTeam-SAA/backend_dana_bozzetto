@@ -44,6 +44,7 @@ export const getTasks = async (req, res) => {
     const { projectId } = req.query;
     const tasks = await Task.find({ project: projectId })
       .populate('assignedTo', 'name avatar')
+      .populate('project', 'name')
       .sort({ createdAt: -1 });
     res.json(tasks);
   } catch (error) {
