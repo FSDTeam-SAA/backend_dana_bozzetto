@@ -55,6 +55,10 @@ app.get('/', (req, res) => {
   res.send('API is running...');
 });
 
+app.get('/healthz', (req, res) => {
+  res.status(200).send('OK');
+});
+
 // Error Handling Middleware
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
