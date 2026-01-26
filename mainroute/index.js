@@ -10,6 +10,7 @@ import chatRoutes from '../route/chatRoutes.js';
 import messageRoutes from '../route/messageRoutes.js';
 import notificationRoutes from '../route/notificationRoutes.js';
 import financeRoutes from '../route/financeRoutes.js';
+import settingsRoutes from './route/settingsRoutes.js';
 
 // Import specialized portal routes
 import adminRoutes from '../route/adminRoutes.js';
@@ -28,6 +29,7 @@ router.use('/chats', chatRoutes);
 router.use('/messages', messageRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/finance', financeRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Portal-specific paths
 router.use('/admin', adminRoutes);

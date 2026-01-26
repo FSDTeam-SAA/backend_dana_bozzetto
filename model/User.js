@@ -56,6 +56,16 @@ const userSchema = new mongoose.Schema({
       default: 'https://via.placeholder.com/150' 
     }
   },
+  settings: {
+    notifications: {
+      messages: { type: Boolean, default: true },
+      approvals: { type: Boolean, default: true },
+      milestones: { type: Boolean, default: true },
+      projectUpdates: { type: Boolean, default: true },
+      invoices: { type: Boolean, default: true } 
+    },
+    language: { type: String, default: 'English (US)' }
+  },
   isVerified: {
     type: Boolean,
     default: false, 
