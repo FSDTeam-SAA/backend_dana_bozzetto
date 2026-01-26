@@ -29,7 +29,7 @@ router.use('/chats', chatRoutes);
 router.use('/messages', messageRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/finance', financeRoutes);
-app.use('/api/settings', settingsRoutes);
+router.use('/settings', settingsRoutes);
 
 // Portal-specific paths
 router.use('/admin', adminRoutes);
