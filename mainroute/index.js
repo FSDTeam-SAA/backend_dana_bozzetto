@@ -10,7 +10,7 @@ import chatRoutes from '../route/chatRoutes.js';
 import messageRoutes from '../route/messageRoutes.js';
 import notificationRoutes from '../route/notificationRoutes.js';
 import financeRoutes from '../route/financeRoutes.js';
-import settingsRoutes from './route/settingsRoutes.js';
+import settingsRoutes from '../route/settingsRoutes.js';
 
 // Import specialized portal routes
 import adminRoutes from '../route/adminRoutes.js';
