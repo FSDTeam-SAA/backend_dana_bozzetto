@@ -359,3 +359,53 @@ export const updateApprovalStatus = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+// @route   GET /api/client-portal/search?q=...
+export const searchClientGlobal = async (req, res) => {
+    try {
+      const { q } = req.query;
+      const userId = req.user._id;
+  
+      if (!q) return res.json({ projects: [], documents: [], invoices: [] });
+  
+      const regex = new RegExp(q, 'i');
+  
+      // 1. Projects (Owned by Client)
+      const projects = await Project.find({
+        client: userId,
+        name: regex
+      }).select('name status coverImage');
+  
+      // 2. Documents (Deliverables in Client's Projects)
+      const userProjects = await Project.find({ client: userId }).select('_id');
+      const projectIds = userProjects.map(p => p._id);
+      
+      const documents = await Document.find({
+        project: { $in: projectIds },
+        type: 'Deliverable', // Clients usually only see deliverables in search
+        name: regex
+      }).select('name type file.url');
+
+      // 3. Invoices (Finance)
+      const invoices = await Finance.find({
+         client: userId,
+         $or: [
+             { customId: regex }, // Search by Invoice ID (e.g., INV-001)
+             { notes: regex }     // Search by description/notes
+         ]
+      }).populate('project', 'name').select('customId totalAmount status issueDate project');
+  
+      res.json({ 
+          projects: projects.map(p => ({
+              _id: p._id,
+              name: p.name,
+              status: p.status,
+              image: p.coverImage?.url
+          })), 
+          documents,
+          invoices
+      });
+    } catch (error) {
+      res.status(500).json({ message: 'Server error' });
+    }
+  };

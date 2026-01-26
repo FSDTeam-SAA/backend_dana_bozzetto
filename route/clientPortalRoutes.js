@@ -5,7 +5,8 @@ import {
   addDocumentComment,
   getClientFinance,
   getClientApprovals,
-  updateApprovalStatus
+  updateApprovalStatus,
+  searchClientGlobal
 } from '../controller/clientPortalController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
@@ -37,5 +38,9 @@ router.get('/approvals', getClientApprovals);
 // @route   PUT /api/client-portal/approvals/:id
 // @desc    Approve/Reject/Request Revision
 router.put('/approvals/:id', updateApprovalStatus);
+
+// @route   GET /api/client-portal/search?q=...
+// @desc    Global Search (Projects, Docs, Invoices)
+router.get('/search', searchClientGlobal);
 
 export default router;

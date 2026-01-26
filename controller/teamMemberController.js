@@ -143,21 +143,24 @@ export const getMemberCalendar = async (req, res) => {
   }
 };
 
-// @desc    Global Search (Projects & Documents)
+// @desc    Global Search (Projects, Documents & Tasks)
+// @route   GET /api/team-portal/search?q=...
 export const searchGlobal = async (req, res) => {
   try {
     const { q } = req.query;
     const userId = req.user._id;
 
-    if (!q) return res.json({ projects: [], documents: [] });
+    if (!q) return res.json({ projects: [], documents: [], tasks: [] });
 
     const regex = new RegExp(q, 'i');
 
+    // 1. Projects
     const projects = await Project.find({
       'teamMembers.user': userId,
       name: regex
     }).select('name status coverImage');
 
+    // 2. Documents
     const userProjects = await Project.find({ 'teamMembers.user': userId }).select('_id');
     const projectIds = userProjects.map(p => p._id);
     
@@ -166,6 +169,13 @@ export const searchGlobal = async (req, res) => {
       name: regex
     }).select('name type file.url');
 
+    // 3. Tasks (ADDED THIS NEW FEATURE)
+    const tasks = await Task.find({
+      assignedTo: userId,
+      name: regex
+    }).select('name status endDate project')
+      .populate('project', 'name');
+
     res.json({ 
         projects: projects.map(p => ({
             _id: p._id,
@@ -173,7 +183,8 @@ export const searchGlobal = async (req, res) => {
             status: p.status,
             image: p.coverImage?.url
         })), 
-        documents 
+        documents,
+        tasks 
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -264,13 +275,14 @@ export const getAllTeamDocuments = async (req, res) => {
 
 // @desc    Get Approvals (Pending & Approved History)
 // @route   GET /api/team-portal/approvals?status=...
-export const getApprovalsForTeamMembers = async (req, res) => {
+export const getPendingApprovals = async (req, res) => {
     try {
         const userId = req.user._id;
         const { status } = req.query; 
 
         let taskQuery = { assignedTo: userId };
         let docQuery = { uploadedBy: userId };
+
         if (status === 'Approved') {
             taskQuery.status = 'Completed';
             docQuery.status = 'Approved';
@@ -278,6 +290,7 @@ export const getApprovalsForTeamMembers = async (req, res) => {
             taskQuery.status = 'Waiting for Approval';
             docQuery.status = 'Review';
         } else {
+            // Default "All"
             taskQuery.status = { $in: ['Waiting for Approval', 'Completed'] };
             docQuery.status = { $in: ['Review', 'Approved'] };
         }
@@ -296,6 +309,8 @@ export const getApprovalsForTeamMembers = async (req, res) => {
     }
 };
 
+// @desc    Get Items Needing Revision
+// @route   GET /api/team-portal/reviews
 export const getItemsForReview = async (req, res) => {
     try {
         const userId = req.user._id;
