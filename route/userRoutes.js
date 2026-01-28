@@ -8,7 +8,9 @@ import {
   deleteUser,
   allUsers,
   updateUserProfile,
-  getUserProfile
+  getUserProfile,
+  updateUserById,
+  getUserById
 } from '../controller/userController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 import upload from '../utils/fileUpload.js';
@@ -57,5 +59,13 @@ router.route('/profile')
 // @route   DELETE /api/users/:id
 // @desc    Delete a user (Admin only)
 router.delete('/:id', authorize('admin'), deleteUser);
+
+// @route   GET /api/users/:id
+// @desc    Get user by id (Admin only)
+router.get('/:id', authorize('admin'), getUserById);
+
+// @route   PUT /api/users/:id
+// @desc    Update user by id (Admin only, supports avatar upload)
+router.put('/:id', authorize('admin'), upload.single('avatar'), updateUserById);
 
 export default router;

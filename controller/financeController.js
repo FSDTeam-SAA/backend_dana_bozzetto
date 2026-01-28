@@ -167,3 +167,104 @@ export const updateFinanceStatus = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+// @desc    Update a finance record (Admin only)
+// @route   PUT /api/finance/:id
+// @access  Private (Admin Only)
+export const updateFinance = async (req, res) => {
+  try {
+    const finance = await Finance.findById(req.params.id);
+    if (!finance) {
+      return res.status(404).json({ message: 'Record not found' });
+    }
+
+    const {
+      type,
+      projectId,
+      clientId,
+      lineItems,
+      taxRate,
+      discount,
+      issueDate,
+      dueDate,
+      notes,
+      status,
+    } = req.body;
+
+    if (type) finance.type = type;
+    if (projectId) finance.project = projectId;
+    if (clientId) finance.client = clientId;
+    if (lineItems) finance.lineItems = lineItems;
+    if (taxRate !== undefined) finance.taxRate = Number(taxRate) || 0;
+    if (discount !== undefined) finance.discount = Number(discount) || 0;
+    if (issueDate) finance.issueDate = issueDate;
+    if (dueDate) finance.dueDate = dueDate;
+    if (notes !== undefined) finance.notes = notes;
+    if (status) finance.status = status;
+
+    // Recalculate totals
+    let subtotal = 0;
+    if (Array.isArray(finance.lineItems)) {
+      finance.lineItems.forEach((item) => {
+        subtotal += (item.quantity || 0) * (item.rate || 0);
+      });
+    }
+    finance.subtotal = subtotal;
+    finance.taxAmount = subtotal * ((finance.taxRate || 0) / 100);
+    finance.totalAmount = subtotal + finance.taxAmount - (finance.discount || 0);
+
+    await finance.save();
+
+    // Recalculate project totals if invoice status changed
+    if (finance.type === 'Invoice' && status) {
+      const project = await Project.findById(finance.project);
+      if (project) {
+        const stats = await Finance.aggregate([
+          { $match: { project: project._id, type: 'Invoice', status: 'Paid' } },
+          { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+        ]);
+        project.totalPaid = stats.length > 0 ? stats[0].total : 0;
+        await project.save();
+      }
+    }
+
+    res.json(finance);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+// @desc    Delete a finance record (Admin only)
+// @route   DELETE /api/finance/:id
+// @access  Private (Admin Only)
+export const deleteFinance = async (req, res) => {
+  try {
+    const finance = await Finance.findById(req.params.id);
+    if (!finance) {
+      return res.status(404).json({ message: 'Record not found' });
+    }
+
+    const projectId = finance.project;
+    const isInvoice = finance.type === 'Invoice';
+
+    await Finance.findByIdAndDelete(req.params.id);
+
+    if (isInvoice && projectId) {
+      const project = await Project.findById(projectId);
+      if (project) {
+        const stats = await Finance.aggregate([
+          { $match: { project: project._id, type: 'Invoice', status: 'Paid' } },
+          { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+        ]);
+        project.totalPaid = stats.length > 0 ? stats[0].total : 0;
+        await project.save();
+      }
+    }
+
+    res.json({ message: 'Finance record removed' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};

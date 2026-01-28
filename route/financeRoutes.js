@@ -3,7 +3,9 @@ import {
   createFinance,
   getFinances,
   getFinanceById,
-  updateFinanceStatus
+  updateFinanceStatus,
+  updateFinance,
+  deleteFinance
 } from '../controller/financeController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
@@ -31,5 +33,15 @@ router.get('/:id', getFinanceById);
 // @desc    Update status (e.g., Admin marks as Paid, Client marks as Approved)
 // @access  Private
 router.put('/:id/status', updateFinanceStatus);
+
+// @route   PUT /api/finance/:id
+// @desc    Update finance record (Admin only)
+// @access  Private
+router.put('/:id', authorize('admin'), updateFinance);
+
+// @route   DELETE /api/finance/:id
+// @desc    Delete finance record (Admin only)
+// @access  Private
+router.delete('/:id', authorize('admin'), deleteFinance);
 
 export default router;
