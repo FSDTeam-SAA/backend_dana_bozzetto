@@ -321,6 +321,7 @@ export const updateUserProfile = async (req, res) => {
     if (user) {
         user.name = req.body.name || user.name;
         user.email = req.body.email || user.email;
+        user.companyName = req.body.companyName || user.companyName;
         user.phoneNumber = req.body.phoneNumber || user.phoneNumber;
         user.address = req.body.address || user.address;
         
@@ -343,6 +344,9 @@ export const updateUserProfile = async (req, res) => {
         name: updatedUser.name,
         email: updatedUser.email,
         role: updatedUser.role,
+        companyName: updatedUser.companyName,
+        address: updatedUser.address,
+        phoneNumber: updatedUser.phoneNumber,
         avatar: updatedUser.avatar,
         token: generateToken(updatedUser._id),
         });

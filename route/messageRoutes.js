@@ -9,7 +9,8 @@ import upload from '../utils/fileUpload.js';
 
 const router = express.Router();
 
-// router.use(protect);
+// All message routes require authentication
+router.use(protect);
 
 // @route   GET /api/messages/:chatId
 // @desc    Fetch message history

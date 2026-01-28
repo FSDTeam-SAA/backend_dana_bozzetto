@@ -71,6 +71,7 @@ export const createProject = async (req, res) => {
     // System now relies on direct 1-on-1 chats.
 
     // Handle Initial Documents
+    let createdDocuments = [];
     if (req.files && req.files['documents']) {
       const initialMilestone = project.milestones[0];
       const uploadPromises = req.files['documents'].map(async (file) => {
@@ -91,7 +92,7 @@ export const createProject = async (req, res) => {
           status: 'Approved'
         });
       });
-      await Promise.all(uploadPromises);
+      createdDocuments = await Promise.all(uploadPromises);
     }
 
     // NOTIFICATION TRIGGER
@@ -109,7 +110,10 @@ export const createProject = async (req, res) => {
         await Promise.all(notificationPromises);
     }
 
-    res.status(201).json(project);
+    res.status(201).json({
+      ...project.toObject(),
+      documents: createdDocuments
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -134,7 +138,29 @@ export const getProjects = async (req, res) => {
         .populate('teamMembers.user', 'name role avatar')
         .sort({ createdAt: -1 });
 
-      res.json(projects);
+      const projectIds = projects.map((project) => project._id);
+      let docQuery = { project: { $in: projectIds } };
+      if (req.user.role === 'client') {
+        docQuery.type = 'Deliverable';
+      }
+
+      const documents = await Document.find(docQuery)
+        .populate('uploadedBy', 'name role')
+        .sort({ createdAt: -1 });
+
+      const documentsByProject = documents.reduce((acc, doc) => {
+        const key = doc.project.toString();
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(doc);
+        return acc;
+      }, {});
+
+      const payload = projects.map((project) => ({
+        ...project.toObject(),
+        documents: documentsByProject[project._id.toString()] || []
+      }));
+
+      res.json(payload);
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: 'Server error' });
@@ -206,10 +232,85 @@ export const getProjectById = async (req, res) => {
 // @desc    Update project details
 export const updateProject = async (req, res) => {
     try {
-      const project = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
-      res.json(project);
+      const project = await Project.findById(req.params.id);
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+
+      const {
+        projectNo,
+        name,
+        description,
+        clientId,
+        budget,
+        startDate,
+        endDate,
+        status,
+        teamMembers
+      } = req.body;
+
+      if (clientId) {
+        const clientUser = await User.findById(clientId);
+        if (!clientUser || clientUser.role !== 'client') {
+          return res.status(400).json({ message: 'Invalid Client ID provided' });
+        }
+        project.client = clientId;
+      }
+
+      if (teamMembers !== undefined) {
+        const parsedMembers = typeof teamMembers === 'string' ? JSON.parse(teamMembers) : teamMembers;
+        if (Array.isArray(parsedMembers)) {
+          project.teamMembers = parsedMembers.map(member => {
+            if (typeof member === 'string') return { user: member, role: 'Contributor' };
+            return member;
+          });
+        }
+      }
+
+      if (projectNo !== undefined) project.projectNo = projectNo;
+      if (name !== undefined) project.name = name;
+      if (description !== undefined) project.description = description;
+      if (budget !== undefined) project.budget = Number(budget);
+      if (startDate !== undefined) project.startDate = startDate;
+      if (endDate !== undefined) project.endDate = endDate;
+      if (status !== undefined) project.status = status;
+
+      if (req.files && req.files['coverImage']) {
+        const file = req.files['coverImage'][0];
+        const result = await uploadToCloudinary(file.buffer, 'architectural-projects/covers');
+        project.coverImage = { public_id: result.public_id, url: result.secure_url };
+      }
+
+      let createdDocuments = [];
+      if (req.files && req.files['documents']) {
+        const initialMilestone = project.milestones[0];
+        const uploadPromises = req.files['documents'].map(async (file) => {
+          const result = await uploadToCloudinary(file.buffer, 'architectural-projects/documents');
+          return Document.create({
+            name: file.originalname,
+            project: project._id,
+            milestoneId: initialMilestone?._id,
+            uploadedBy: req.user._id,
+            file: {
+              public_id: result.public_id,
+              url: result.secure_url,
+              mimeType: file.mimetype,
+              size: file.size,
+              format: result.format
+            },
+            type: 'Other',
+            status: 'Approved'
+          });
+        });
+        createdDocuments = await Promise.all(uploadPromises);
+      }
+
+      await project.save();
+      res.json({
+        ...project.toObject(),
+        documents: createdDocuments
+      });
     } catch (error) {
-      res.status(500).json({ message: 'Server error' });
+      console.error(error);
+      res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
 

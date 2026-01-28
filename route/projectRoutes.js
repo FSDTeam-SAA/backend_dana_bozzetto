@@ -30,7 +30,14 @@ router.route('/')
 
 router.route('/:id')
   .get(getProjectById)
-  .put(authorize('admin'), updateProject)
+  .put(
+    authorize('admin'),
+    upload.fields([
+      { name: 'coverImage', maxCount: 1 },
+      { name: 'documents', maxCount: 10 }
+    ]),
+    updateProject
+  )
   .delete(authorize('admin'), deleteProject);
 
 // Route to add a milestone manually

@@ -23,7 +23,7 @@ const fileFilter = (req, file, cb) => {
     file.mimetype === 'application/zip' || 
     file.mimetype === 'application/x-zip-compressed';
 
-  if (extname) {
+  if (extname || mimetype) {
     return cb(null, true);
   } else {
     cb(new Error('Error: Invalid file type. Allowed: Images, PDF, CAD (DWG/DXF), Archives (ZIP), Office Docs.'));
