@@ -18,7 +18,11 @@ export const getClientDashboard = async (req, res) => {
       .populate('teamMembers.user', 'name avatar')
       .sort({ endDate: 1 });
 
-    const projects = projectsRaw.map(p => {
+    const activeProjects = projectsRaw.filter(
+      (project) => project.status?.toLowerCase() === 'active',
+    );
+
+    const projects = activeProjects.map(p => {
       const totalMilestones = p.milestones.length || 1;
       const completedMilestones = p.milestones.filter(m => m.status === 'Completed').length;
       let currentStep = completedMilestones + 1;
@@ -378,11 +382,18 @@ export const searchClientGlobal = async (req, res) => {
       const userProjects = await Project.find({ client: userId }).select('_id');
       const projectIds = userProjects.map(p => p._id);
       
+      const matchedProjectIds = projects.map(p => p._id);
+
       const documents = await Document.find({
         project: { $in: projectIds },
         // Removed strict type check to ensure results appear if names match
-        name: regex
-      }).select('name type file.url');
+        $or: [
+          { name: regex },
+          { project: { $in: matchedProjectIds } }
+        ]
+      })
+      .select('name type file.url project')
+      .populate('project', 'name');
 
       // 3. Invoices (Finance)
       const invoices = await Finance.find({
@@ -400,7 +411,13 @@ export const searchClientGlobal = async (req, res) => {
               status: p.status,
               image: p.coverImage?.url
           })), 
-          documents,
+          documents: documents.map(doc => ({
+              _id: doc._id,
+              name: doc.name,
+              type: doc.type,
+              file: { url: doc.file?.url || '' },
+              projectName: doc.project?.name || ''
+          })),
           invoices
       });
     } catch (error) {

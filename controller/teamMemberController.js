@@ -164,10 +164,17 @@ export const searchGlobal = async (req, res) => {
     const userProjects = await Project.find({ 'teamMembers.user': userId }).select('_id');
     const projectIds = userProjects.map(p => p._id);
     
+    const matchedProjectIds = projects.map(p => p._id);
+
     const documents = await Document.find({
       project: { $in: projectIds },
-      name: regex
-    }).select('name type file.url');
+      $or: [
+        { name: regex },
+        { project: { $in: matchedProjectIds } }
+      ]
+    })
+    .select('name type file.url project')
+    .populate('project', 'name');
 
     // 3. Tasks (ADDED THIS NEW FEATURE)
     const tasks = await Task.find({
@@ -183,7 +190,13 @@ export const searchGlobal = async (req, res) => {
             status: p.status,
             image: p.coverImage?.url
         })), 
-        documents,
+        documents: documents.map(doc => ({
+            _id: doc._id,
+            name: doc.name,
+            type: doc.type,
+            file: { url: doc.file?.url || '' },
+            projectName: doc.project?.name || ''
+        })),
         tasks 
     });
   } catch (error) {
