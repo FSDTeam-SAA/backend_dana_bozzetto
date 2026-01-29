@@ -38,9 +38,22 @@ const io = initSocket(httpServer);
 app.set('io', io);
 
 // Middleware
+const allowed = [
+  process.env.FRONTEND_URL,        // e.g. "http://localhost:3000" or "https://app.com"
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:5173",
+  "https://admin-dashboard-dana-bozzetto-rgcx.vercel.app",
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
-  credentials: true // Vital for cookies to work with CORS
+  origin: (origin, cb) => {
+    // allow non-browser clients (Postman/curl) which may send no origin
+    if (!origin) return cb(null, true);
+    if (allowed.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
 }));
 app.use(express.json()); // Body parser
 app.use(cookieParser()); // Cookie parser middleware
