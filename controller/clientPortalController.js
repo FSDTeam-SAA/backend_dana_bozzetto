@@ -42,7 +42,7 @@ export const getClientDashboard = async (req, res) => {
     // Recent Activity Logic
     const newDocs = await Document.find({ 
       project: { $in: projectIds },
-      type: 'Deliverable', 
+      // Removed strict 'Deliverable' type check here too, looking for milestone-related or specific statuses
       status: { $in: ['Approved', 'Review', 'Revision Requested'] }
     })
     .sort({ createdAt: -1 })
@@ -51,7 +51,6 @@ export const getClientDashboard = async (req, res) => {
 
     const pendingApprovals = await Document.find({ 
       project: { $in: projectIds },
-      type: 'Deliverable', 
       status: 'Review' 
     })
     .sort({ createdAt: -1 })
@@ -131,19 +130,20 @@ export const getClientDocuments = async (req, res) => {
     const userId = req.user._id;
     const { milestone } = req.query; 
     
-    // 1. Get all projects owned by this client
     const projects = await Project.find({ client: userId });
     const projectIds = projects.map(p => p._id);
 
-    // 2. Query: Only 'Deliverable' type documents in those projects
+    // Query: Any document in these projects (Removed strict 'Deliverable' check)
+    // You might want to filter out 'Internal' docs if you have such a type, 
+    // but usually clients should see most docs if they are in the project folder.
     let query = { 
-      project: { $in: projectIds },
-      type: 'Deliverable' 
+      project: { $in: projectIds }
     };
 
-    // 3. Milestone Filtering
+    // If you specifically want ONLY milestone deliverables here:
+    // query.milestoneId = { $exists: true };
+
     if (milestone && milestone !== 'All') {
-        // Find matching milestone IDs from the user's projects
         let targetMilestoneIds = [];
         projects.forEach(p => {
             const found = p.milestones.find(m => m.name === milestone);
@@ -157,7 +157,6 @@ export const getClientDocuments = async (req, res) => {
       .populate('uploadedBy', 'name') 
       .sort({ createdAt: -1 });
 
-    // Format for Frontend
     const formattedDocs = documents.map(doc => {
       const milestoneObj = doc.project.milestones.id(doc.milestoneId);
       const sizeInMB = (doc.file.size / (1024 * 1024)).toFixed(2); 
@@ -209,12 +208,10 @@ export const addDocumentComment = async (req, res) => {
 export const getClientFinance = async (req, res) => {
     try {
         const userId = req.user._id;
-        const { status } = req.query; // Filter: All, Paid, Unpaid...
+        const { status } = req.query; 
 
-        // Base Query: Own Projects + Type Invoice
         let query = { client: userId, type: 'Invoice' };
 
-        // Apply Filter
         if (status && status !== 'All') {
             query.status = status;
         }
@@ -223,7 +220,6 @@ export const getClientFinance = async (req, res) => {
           .populate('project', 'name')
           .sort({ issueDate: -1 });
     
-        // Calculate Totals for Widgets (Global totals)
         const allInvoices = await Finance.find({ client: userId, type: 'Invoice' });
         const totalPaid = allInvoices.filter(inv => inv.status === 'Paid').reduce((acc, inv) => acc + (inv.totalAmount || 0), 0);
         const totalUnpaid = allInvoices.filter(inv => inv.status !== 'Paid').reduce((acc, inv) => acc + (inv.totalAmount || 0), 0);
@@ -251,19 +247,22 @@ export const getClientFinance = async (req, res) => {
 
 // @desc    Get Client Approvals (Filtered)
 // @route   GET /api/client-portal/approvals?status=Pending
+// --- FIXED: Removed strict 'type: Deliverable' check ---
 export const getClientApprovals = async (req, res) => {
     try {
         const userId = req.user._id;
-        const { status } = req.query; // Filter: All, Pending, Approved...
+        const { status } = req.query; 
 
         // 1. Get Projects
         const projects = await Project.find({ client: userId }).select('_id');
         const projectIds = projects.map(p => p._id);
     
         // 2. Base Query
+        // FIX: We look for documents that have a milestoneId (meaning they are milestone deliverables)
+        // OR rely purely on the status if you want to include all approval items.
         let query = {
           project: { $in: projectIds },
-          type: 'Deliverable'
+          milestoneId: { $exists: true } // Ensures we only pick up milestone-related documents
         };
 
         // 3. Apply Status Filter
@@ -271,7 +270,6 @@ export const getClientApprovals = async (req, res) => {
             if (status === 'Pending') query.status = 'Review'; // Client sees "Review" as "Pending Action"
             else query.status = status;
         } else {
-             // Default View: Show all relevant to approvals
              query.status = { $in: ['Review', 'Approved', 'Rejected', 'Revision Requested'] };
         }
     
@@ -329,7 +327,7 @@ export const updateApprovalStatus = async (req, res) => {
 
     await document.save();
 
-    // NOTIFICATION TRIGGER: Notify ALL Admins
+    // NOTIFICATION TRIGGER
     const admins = await User.find({ role: 'admin' });
     
     let notifMessage = '';
@@ -382,7 +380,7 @@ export const searchClientGlobal = async (req, res) => {
       
       const documents = await Document.find({
         project: { $in: projectIds },
-        type: 'Deliverable', // Clients usually only see deliverables in search
+        // Removed strict type check to ensure results appear if names match
         name: regex
       }).select('name type file.url');
 
@@ -390,8 +388,8 @@ export const searchClientGlobal = async (req, res) => {
       const invoices = await Finance.find({
          client: userId,
          $or: [
-             { customId: regex }, // Search by Invoice ID (e.g., INV-001)
-             { notes: regex }     // Search by description/notes
+             { customId: regex }, 
+             { notes: regex }     
          ]
       }).populate('project', 'name').select('customId totalAmount status issueDate project');
   
