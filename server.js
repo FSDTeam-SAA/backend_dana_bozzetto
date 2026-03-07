@@ -43,6 +43,7 @@ const allowed = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
   "http://localhost:5173",
+  "https://admin-dashboard-dana-bozzetto.vercel.app",
   "https://admin-dashboard-dana-bozzetto-rgcx.vercel.app",
 ].filter(Boolean);
 
